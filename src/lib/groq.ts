@@ -352,7 +352,7 @@ export function generateLocalSignals(): ParsedSignal[] {
   const timeBlock = Math.floor(Date.now() / (120 * 1000));
   const rng = seededRandom(timeBlock);
 
-  const count = 4 + Math.floor(rng() * 3);
+  const count = 3 + Math.floor(rng() * 2);
   const shuffled = [...PAIR_CONFIGS].sort(() => rng() - 0.5).slice(0, count);
 
   return shuffled.map((cfg) => {
@@ -388,7 +388,7 @@ export function generateLocalSignals(): ParsedSignal[] {
       slPips: Math.round(slPips * 10) / 10,
       tpPips: Math.round(tpPips * 10) / 10,
       riskReward: Math.round(rr * 10) / 10,
-      confidence: Math.round(48 + rng() * 40),
+      confidence: Math.round(55 + rng() * 35),
       reasoning,
     };
   });

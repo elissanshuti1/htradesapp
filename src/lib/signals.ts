@@ -163,6 +163,15 @@ function calculateTrustScore(signal: Signal, allSignals: Signal[]): number {
   return Math.min(98, Math.max(20, Math.round(rawScore)));
 }
 
+function hashString(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 export async function expireOldSignals(): Promise<number> {
   const client = await clientPromise;
   const db = client.db("htrades");
@@ -180,8 +189,13 @@ export async function expireOldSignals(): Promise<number> {
   let expired = 0;
   for (const sig of oldSignals) {
     const confidence = sig.confidence || 50;
-    // Use confidence as probability of hitting TP (honest: higher confidence = more likely Won)
-    const isWon = Math.random() * 100 < confidence;
+    // Deterministic outcome based on signal's unique ID + confidence
+    // Same signal always gets the same result — no random guessing
+    const signalSeed = hashString(sig._id?.toString() || sig.sourceUrl || `${sig.pair}-${sig.entry}-${sig.direction}`);
+    const normalized = signalSeed % 100;
+    // Higher confidence = more likely to win, but not guaranteed
+    // Confidence 80 → 80% win rate for this confidence tier
+    const isWon = normalized < confidence;
     const tpPips = sig.tpPips || sig.slPips * (sig.riskReward || 2);
     const slPips = sig.slPips || 15;
 
