@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+import AuthButton from "@/components/AuthButton";
 
 const ArrowRight = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3.5 9H14.5M14.5 9L10 4.5M14.5 9L10 13.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -33,6 +35,9 @@ const MenuIcon = () => (
 );
 const CloseIcon = () => (
   <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M5 5L17 17M17 5L5 17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
+);
+const TargetIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.4"/><circle cx="9" cy="9" r="2.2" stroke="currentColor" strokeWidth="1.4"/><path d="M9 1V3M9 15V17M1 9H3M15 9H17" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
 );
 
 function Counter({ target, suffix = "" }: { target: number; suffix?: string }) {
@@ -74,83 +79,98 @@ function useReveal(threshold = 0.15) {
   return { ref, visible };
 }
 
-function CandlestickViz({ color, data }: { color: string; data: { open: number; close: number; high: number; low: number; green: boolean }[] }) {
-  const w = 800;
-  const h = 260;
-  const padL = 8;
-  const padR = 24;
-  const padT = 16;
-  const padB = 32;
-  const chartW = w - padL - padR;
-  const chartH = h - padT - padB;
-  const candleW = chartW / data.length;
+function ChartMock() {
+  const w = 520;
+  const h = 300;
+  const padL = 12;
+  const padR = 60;
+  const padT = 20;
+  const padB = 30;
 
-  const allPrices = data.flatMap(d => [d.high, d.low]);
+  const data = [
+    { o: 2340, c: 2330, h: 2345, l: 2325 },
+    { o: 2330, c: 2338, h: 2342, l: 2328 },
+    { o: 2338, c: 2325, h: 2340, l: 2320 },
+    { o: 2325, c: 2335, h: 2338, l: 2322 },
+    { o: 2335, c: 2328, h: 2340, l: 2324 },
+    { o: 2328, c: 2340, h: 2344, l: 2326 },
+    { o: 2340, c: 2332, h: 2345, l: 2330 },
+    { o: 2332, c: 2345, h: 2348, l: 2330 },
+    { o: 2345, c: 2338, h: 2350, l: 2335 },
+    { o: 2338, c: 2348, h: 2352, l: 2336 },
+    { o: 2348, c: 2340, h: 2352, l: 2338 },
+    { o: 2340, c: 2350, h: 2354, l: 2338 },
+    { o: 2350, c: 2342, h: 2355, l: 2340 },
+    { o: 2342, c: 2352, h: 2356, l: 2340 },
+    { o: 2352, c: 2345, h: 2358, l: 2342 },
+    { o: 2345, c: 2355, h: 2360, l: 2344 },
+    { o: 2355, c: 2348, h: 2360, l: 2346 },
+    { o: 2348, c: 2360, h: 2364, l: 2346 },
+    { o: 2360, c: 2352, h: 2364, l: 2350 },
+    { o: 2352, c: 2365, h: 2368, l: 2350 },
+  ];
+
+  const allPrices = data.flatMap(d => [d.h, d.l]);
   const minP = Math.min(...allPrices);
   const maxP = Math.max(...allPrices);
   const range = maxP - minP || 1;
-  const toY = (v: number) => padT + ((maxP - v) / range) * chartH;
+  const toY = (v: number) => padT + ((maxP - v) / range) * (h - padT - padB);
+  const candleW = (w - padL - padR) / data.length;
 
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(pct => {
-    const val = maxP - pct * range;
-    const y = padT + pct * chartH;
-    return { val, y, label: val.toFixed(val > 100 ? 1 : 3) };
-  });
+  const entryLevel = 2342.5;
+  const slLevel = 2338.0;
+  const tpLevel = 2368.0;
 
-  const linePoints = data.map((d, i) => `${padL + candleW * i + candleW / 2},${toY((d.open + d.close) / 2)}`).join(" ");
+  const line = (level: number, color: string, label: string, left = false) => {
+    const y = toY(level);
+    return (
+      <g key={label}>
+        <line x1={padL} y1={y} x2={w - padR} y2={y} stroke={color} strokeWidth="1.4" strokeDasharray="5,4" opacity="0.85" />
+        <rect x={left ? padL : w - padR - 2} y={y - 10} width={left ? label.length * 5.6 + 16 : 60} height="20" rx="4" fill={color} />
+        <text x={left ? padL + 8 : w - padR + 28} y={y + 3} fill="#fff" fontSize="10" fontFamily="'JetBrains Mono', monospace" fontWeight="600" textAnchor={left ? "start" : "middle"}>{label}</text>
+      </g>
+    );
+  };
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto" }}>
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto", display: "block" }}>
       <defs>
-        <linearGradient id={`cg-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.08" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id={`candle-green-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.85" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.5" />
+        <linearGradient id="mock-glow" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#7C6AFF" stopOpacity="0.10" />
+          <stop offset="100%" stopColor="#7C6AFF" stopOpacity="0" />
         </linearGradient>
       </defs>
 
-      {gridLines.map((g, i) => (
-        <g key={i}>
-          <line x1={padL} y1={g.y} x2={w - padR} y2={g.y} stroke="#1A1929" strokeWidth="0.5" strokeDasharray={i === 0 || i === 4 ? "0" : "4,4"} />
-          <text x={w - padR + 6} y={g.y + 3} fill="#3D3B52" fontSize="9" fontFamily="'JetBrains Mono', monospace">{g.label}</text>
-        </g>
-      ))}
-
-      {data.map((d, i) => {
-        const cx = padL + candleW * i + candleW / 2;
-        const bodyW = candleW * 0.55;
-        const isGreen = d.green;
-        const bodyTop = toY(Math.max(d.open, d.close));
-        const bodyBot = toY(Math.min(d.open, d.close));
-        const bodyH = Math.max(bodyBot - bodyTop, 1.5);
-        const fillColor = isGreen ? `url(#candle-green-${color.replace("#", "")})` : "#FF5252";
-
+      {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+        const y = padT + pct * (h - padT - padB);
+        const val = maxP - pct * range;
         return (
           <g key={i}>
-            <line x1={cx} y1={toY(d.high)} x2={cx} y2={toY(d.low)} stroke={isGreen ? color : "#FF5252"} strokeWidth="1.2" opacity="0.5" />
-            <rect x={cx - bodyW / 2} y={bodyTop} width={bodyW} height={bodyH} fill={fillColor} rx="0.5" />
+            <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="#1A1929" strokeWidth="0.6" strokeDasharray={i === 0 || i === 4 ? "0" : "4,4"} />
+            <text x={w - padR + 6} y={y + 3} fill="#3D3B52" fontSize="9" fontFamily="'JetBrains Mono', monospace">{val.toFixed(1)}</text>
           </g>
         );
       })}
 
-      <polyline points={linePoints} fill="none" stroke={color} strokeWidth="1" opacity="0.25" strokeDasharray="3,3" />
-      <polygon points={`0,${h} ${data.map((d, i) => `${padL + candleW * i + candleW / 2},${toY((d.open + d.close) / 2)}`).join(" ")} ${w},${h}`} fill={`url(#cg-${color.replace("#", "")})`} opacity="0.6" />
-
-      {data.length > 1 && (() => {
-        const last = data[data.length - 1];
-        const lastCx = padL + candleW * (data.length - 1) + candleW / 2;
-        const lastY = toY(last.close);
+      {data.map((d, i) => {
+        const cx = padL + candleW * i + candleW / 2;
+        const bodyW = candleW * 0.55;
+        const green = d.c >= d.o;
+        const top = toY(Math.max(d.o, d.c));
+        const bot = toY(Math.min(d.o, d.c));
         return (
-          <g>
-            <line x1={padL} y1={lastY} x2={w - padR} y2={lastY} stroke={last.green ? color : "#FF5252"} strokeWidth="0.8" strokeDasharray="3,3" opacity="0.5" />
-            <rect x={w - padR - 4} y={lastY - 9} width="48" height="18" fill={last.green ? color : "#FF5252"} rx="2" />
-            <text x={w - padR + 20} y={lastY + 3} fill="#fff" fontSize="9" fontFamily="'JetBrains Mono', monospace" textAnchor="middle">{last.close.toFixed(last.close > 100 ? 1 : 3)}</text>
+          <g key={i}>
+            <line x1={cx} y1={toY(d.h)} x2={cx} y2={toY(d.l)} stroke={green ? "#7C6AFF" : "#FF5252"} strokeWidth="1" opacity="0.5" />
+            <rect x={cx - bodyW / 2} y={top} width={bodyW} height={Math.max(bot - top, 1.5)} rx="0.5" fill={green ? "#7C6AFF" : "#FF5252"} />
           </g>
         );
-      })()}
+      })}
+
+      <polygon points={`${padL},${h - padB} ${data.map((d, i) => `${padL + candleW * i + candleW / 2},${toY((d.o + d.c) / 2)}`).join(" ")} ${w - padR},${h - padB}`} fill="url(#mock-glow)" />
+
+      {line(tpLevel, "#22C55E", "TP 2368")}
+      {line(entryLevel, "#E2DDD6", "ENTRY 2342.5")}
+      {line(slLevel, "#FF5252", "SL 2338")}
     </svg>
   );
 }
@@ -166,25 +186,22 @@ export default function HTradesLanding() {
   }, []);
 
   const features = [
-    { icon: <CreditIcon />, title: "Real-Time Signal Scanner", desc: "HTRADES scans TradingView, YouTube, Forex Factory, Twitter, and 20+ platforms 24/7 — catching setups the second they appear." },
-    { icon: <UsersIcon />, title: "8 Major Markets", desc: "EUR/USD, GBP/USD, USD/JPY, XAU/USD, AUD/USD, USD/CAD, USD/CHF, NZD/USD. Full coverage of the pairs that move money." },
-    { icon: <StarIcon />, title: "Trust-Verified Sources", desc: "AI ranks every source by historical accuracy. You only see signals from traders who actually know what they're doing." },
-    { icon: <FeedbackIcon />, title: "Exact Entry, SL, TP", desc: "Every signal comes with precise levels. No vague suggestions. No guessing. Just actionable setups delivered instantly." },
-    { icon: <DiscoverIcon />, title: "Smart Validation", desc: "Signals checked against live prices the moment they arrive. Expired setups are discarded. You only see what's still tradeable." },
-    { icon: <ShieldIcon />, title: "Anti-Noise Engine", desc: "Low-quality sources, fake gurus, and spam signals are automatically filtered. You get only what's worth your attention." },
+    { icon: <DiscoverIcon />, title: "Vision-Powered Chart Analysis", desc: "Upload any TradingView screenshot. The AI reads the price axis, candles and structure directly from your image — no manual entry, no guessing." },
+    { icon: <TargetIcon />, title: "SMC or ICT — Your Choice", desc: "Pick Smart Money Concepts or Inner Circle Trader. Every level is framed in your methodology: order blocks, FVGs, liquidity pools, PD arrays, OTE." },
+    { icon: <StarIcon />, title: "Sniper Entry, SL & TP", desc: "Get an ultra-precise sniper entry, a clean activation entry, and exactly where to put your stop loss and take profit. No vague zones." },
+    { icon: <ShieldIcon />, title: "20% Loss Cap Built In", desc: "The risk guard sizes your position so a stop-out can never cost you more than 20% of your account — with a safe 2% default." },
+    { icon: <ZapIcon />, title: "Levels in Seconds", desc: "No more staring at charts for hours. Screenshot it, drop it, and get a structured trade plan with reasoning you can trust." },
+    { icon: <CreditIcon />, title: "Any Instrument, Any Timeframe", desc: "Forex, gold, indices, crypto — if you can screenshot it, we can analyze it. Works on any timeframe your chart is set to." },
   ];
 
   const steps = [
-    { num: "01", label: "Connect", desc: "Pick your markets. Set your risk preferences. Done in 30 seconds." },
-    { num: "02", label: "Scan", desc: "HTRADES starts scanning 20+ platforms in real-time for your pairs." },
-    { num: "03", label: "Alert", desc: "High-confidence setups hit your dashboard instantly. No lag." },
-    { num: "04", label: "Execute", desc: "See the setup. Check the levels. Take the trade. It's that simple." },
+    { num: "01", label: "Screenshot", desc: "Grab a screenshot of your TradingView chart with price levels visible." },
+    { num: "02", label: "Choose SMC / ICT", desc: "Select the institutional methodology you trade with. We adapt to it." },
+    { num: "03", label: "Analyze", desc: "The AI reads the structure and maps your exact entry, stop loss and take profit." },
+    { num: "04", label: "Execute", desc: "Size your position with the built-in risk guard so you never lose more than 20%." },
   ];
 
-  const markets = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD"];
-
-  const statsReveal = useReveal();
-  const marketsReveal = useReveal();
+  const heroReveal = useReveal();
   const featuresReveal = useReveal();
   const stepsReveal = useReveal();
   const ctaReveal = useReveal();
@@ -235,6 +252,7 @@ export default function HTradesLanding() {
           gap: 8px;
           transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
           letter-spacing: 0.01em;
+          text-decoration: none;
         }
         .btn-primary:hover { background:#6A58EE; transform:translateY(-2px); box-shadow:0 8px 24px rgba(124,106,255,0.35); }
         .btn-primary:active { transform:translateY(0); }
@@ -253,25 +271,9 @@ export default function HTradesLanding() {
           align-items: center;
           gap: 8px;
           transition: color 0.2s, border-color 0.2s, transform 0.2s;
+          text-decoration: none;
         }
         .btn-ghost:hover { color:#E2DDD6; border-color:#3A3850; transform:translateY(-1px); }
-
-        .btn-outline-accent {
-          background: transparent;
-          color: #7C6AFF;
-          border: 1px solid #7C6AFF44;
-          font-family: 'Syne', sans-serif;
-          font-weight: 600;
-          font-size: 0.85rem;
-          padding: 11px 22px;
-          border-radius: 50px;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.2s;
-        }
-        .btn-outline-accent:hover { background:#7C6AFF11; border-color:#7C6AFF88; }
 
         .accent-line { width: 32px; height: 2px; background: #7C6AFF; border-radius: 2px; margin-bottom: 1.2rem; }
 
@@ -297,15 +299,6 @@ export default function HTradesLanding() {
           background: linear-gradient(90deg, transparent, #7C6AFF22, transparent);
           z-index:1;
         }
-        .card::after {
-          content:'';
-          position:absolute;
-          inset:0;
-          background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-          opacity: 0.028;
-          pointer-events: none;
-          z-index: 0;
-        }
         .card > * { position: relative; z-index: 1; }
 
         .dot-bg {
@@ -316,9 +309,8 @@ export default function HTradesLanding() {
         .step-connector { display:none; }
         @media(min-width:768px) { .step-connector { display:block; } }
 
-        .comm-bar { width:3px; border-radius:2px; flex-shrink:0; }
-
         @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .live-dot { width:7px; height:7px; background:#22C55E; border-radius:50%; animation:pulse 2s ease-in-out infinite; }
 
         .icon-ring {
@@ -335,14 +327,7 @@ export default function HTradesLanding() {
 
         .nav-scrolled { background: rgba(10,10,15,0.92); backdrop-filter: blur(14px); border-bottom: 1px solid #141320; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
 
-        .hero-grid-line {
-          position: absolute;
-          background: #1A1929;
-        }
-
-        .chart-glow {
-          filter: drop-shadow(0 0 20px rgba(124,106,255,0.15));
-        }
+        .chart-glow { filter: drop-shadow(0 0 20px rgba(124,106,255,0.15)); }
       `}</style>
 
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-400 f-sans ${scrolled ? "nav-scrolled" : ""}`}>
@@ -352,7 +337,7 @@ export default function HTradesLanding() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 32 }} className="hidden md:flex">
-            {["Features", "Markets", "How It Works", "Pricing"].map(item => (
+            {["Features", "Methodologies", "How It Works", "Pricing"].map(item => (
               <a key={item} href="#" className="f-mono" style={{ fontSize: "0.75rem", color: "#A09A92", letterSpacing: "0.08em", textDecoration: "none", textTransform: "uppercase", transition: "color 0.2s" }}
                 onMouseEnter={e => (e.currentTarget.style.color = "#E2DDD6")}
                 onMouseLeave={e => (e.currentTarget.style.color = "#A09A92")}
@@ -361,8 +346,8 @@ export default function HTradesLanding() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }} className="hidden md:flex">
-            <button className="btn-ghost" style={{ padding: "10px 20px", fontSize: "0.82rem", color: "#E2DDD6" }}>Sign In</button>
-            <button className="btn-primary" style={{ padding: "10px 20px", fontSize: "0.82rem" }}>Get Early Access</button>
+            <AuthButton />
+            <Link href="/dashboard" className="btn-primary" style={{ padding: "10px 20px", fontSize: "0.82rem" }}>Analyze a Chart</Link>
           </div>
 
           <button className="md:hidden" style={{ color: "#A09A92", background: "none", border: "none", cursor: "pointer" }} onClick={() => setMenuOpen(!menuOpen)}>
@@ -372,10 +357,11 @@ export default function HTradesLanding() {
 
         {menuOpen && (
           <div className="md:hidden" style={{ background: "#0A0A0F", borderBottom: "1px solid #141320", padding: "20px 28px", display: "flex", flexDirection: "column", gap: 16 }}>
-            {["Features", "Markets", "How It Works", "Pricing"].map(item => (
+            {["Features", "Methodologies", "How It Works", "Pricing"].map(item => (
               <a key={item} href="#" className="f-mono" style={{ fontSize: "0.75rem", color: "#A09A92", letterSpacing: "0.08em", textDecoration: "none", textTransform: "uppercase" }}>{item}</a>
             ))}
-            <button className="btn-primary" style={{ width: "fit-content", marginTop: 4 }}>Get Early Access</button>
+            <AuthButton />
+            <Link href="/dashboard" className="btn-primary" style={{ width: "fit-content", marginTop: 4, textDecoration: "none" }}>Analyze a Chart</Link>
           </div>
         )}
       </nav>
@@ -383,139 +369,68 @@ export default function HTradesLanding() {
       <section className="dot-bg" style={{ paddingTop: 140, paddingBottom: 100, paddingLeft: 28, paddingRight: 28, position: "relative" }}>
         <div style={{ position: "absolute", top: 80, left: "50%", transform: "translateX(-50%)", width: 700, height: 350, background: "rgba(100,80,255,0.09)", borderRadius: "50%", filter: "blur(90px)", pointerEvents: "none" }} />
         <div style={{ position: "absolute", top: 160, left: "35%", transform: "translateX(-50%)", width: 350, height: 200, background: "rgba(60,120,255,0.05)", borderRadius: "50%", filter: "blur(70px)", pointerEvents: "none" }} />
-        <div className="hero-grid-line" style={{ left: "35%", top: 0, bottom: 0, width: 1, opacity: 0.3 }} />
-        <div className="hero-grid-line" style={{ right: "35%", top: 0, bottom: 0, width: 1, opacity: 0.3 }} />
 
         <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center", position: "relative", zIndex: 1 }}>
           <div className="hero-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #1F1E2A", borderRadius: 50, padding: "7px 16px", marginBottom: 32 }}>
             <div className="live-dot" />
-            <span className="f-mono" style={{ fontSize: "0.7rem", color: "#5A5470", letterSpacing: "0.1em", textTransform: "uppercase" }}>Scanning 20+ Platforms in Real Time</span>
+            <span className="f-mono" style={{ fontSize: "0.7rem", color: "#5A5470", letterSpacing: "0.1em", textTransform: "uppercase" }}>AI Chart Analysis · SMC & ICT</span>
           </div>
 
           <h1 className="f-display hero-h1" style={{ fontSize: "clamp(3rem, 7vw, 5.5rem)", lineHeight: 1.06, letterSpacing: "-0.02em", color: "#E2DDD6", margin: "0 auto 16px" }}>
-            Never miss a trade again.<br />
-            <em style={{ color: "#7C6AFF", fontStyle: "italic", fontSize: "clamp(1.6rem, 3.5vw, 3rem)" }}>Setups delivered before they move.</em>
+            Screenshot a chart.<br />
+            <em style={{ color: "#7C6AFF", fontStyle: "italic", fontSize: "clamp(1.6rem, 3.5vw, 3rem)" }}>Get your sniper entry in seconds.</em>
           </h1>
 
-          <p className="f-sans hero-sub" style={{ fontSize: "1.1rem", color: "#6A6480", lineHeight: 1.7, maxWidth: 560, margin: "0 auto 40px" }}>
-            HTRADES scans TradingView, YouTube, Forex Factory, Twitter and 20+ platforms 24/7 — and delivers validated setups with exact Entry, SL & TP straight to you before the market moves.
+          <p className="f-sans hero-sub" style={{ fontSize: "1.1rem", color: "#6A6480", lineHeight: 1.7, maxWidth: 600, margin: "0 auto 40px" }}>
+            Upload a TradingView screenshot, pick <b style={{ color: "#E2DDD6" }}>SMC</b> or <b style={{ color: "#E2DDD6" }}>ICT</b>, and HTRADES reads the structure to hand you the exact entry, stop loss and take profit — with a hard cap so you never risk more than 20% of your account.
           </p>
 
           <div className="hero-ctas" style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-            <button className="btn-primary">Start for Free <ArrowRight /></button>
-            <button className="btn-ghost">See How It Works</button>
+            <Link href="/dashboard" className="btn-primary">Analyze a Chart Free <ArrowRight /></Link>
+            <a className="btn-ghost" href="#how">See How It Works</a>
           </div>
 
-          <div ref={statsReveal.ref} className="hero-visual" style={{ marginTop: 72, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 1, background: "#13121C", borderRadius: 20, overflow: "hidden" }}>
-            {[
-              { val: 20, suffix: "+", label: "Platforms Scanned" },
-              { val: 8,  suffix: "", label: "Major Markets" },
-              { val: 3,   suffix: "s", label: "Avg Alert Speed" },
-              { val: 94,  suffix: "%", label: "Signal Accuracy" },
-            ].map(({ val, suffix, label }, i) => (
-              <div key={label} style={{ background: "#0A0A0F", padding: "28px 28px 24px", borderRight: i < 3 ? "1px solid #13121C" : "none" }}>
-                <div className="f-display" style={{ fontSize: "2.4rem", color: "#E2DDD6", lineHeight: 1, marginBottom: 6 }}>
-                  <Counter target={val} suffix={suffix} />
+          <div ref={heroReveal.ref} className="hero-visual" style={{ marginTop: 72, textAlign: "left" }}>
+            <div className="card chart-glow" style={{ padding: 24 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div className="icon-ring"><TargetIcon /></div>
+                  <div>
+                    <div className="f-display" style={{ fontSize: "1.2rem", color: "#E2DDD6", letterSpacing: "-0.02em" }}>XAU/USD — H1</div>
+                    <div className="f-mono" style={{ fontSize: "0.65rem", color: "#3D3B52", letterSpacing: "0.08em" }}>SMART MONEY CONCEPTS</div>
+                  </div>
                 </div>
-                <div className="f-mono" style={{ fontSize: "0.68rem", color: "#3D3B52", letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <hr className="sep" />
-
-      <section style={{ padding: "100px 28px", position: "relative" }}>
-        <div style={{ position: "absolute", top: "20%", left: "10%", width: 400, height: 300, background: "rgba(100,80,255,0.04)", borderRadius: "50%", filter: "blur(80px)", pointerEvents: "none" }} />
-        <div ref={marketsReveal.ref} style={{ maxWidth: 1120, margin: "0 auto" }}>
-          <div className={`reveal ${marketsReveal.visible ? "in" : ""}`} style={{ textAlign: "center", marginBottom: 16 }}>
-            <div className="accent-line" style={{ margin: "0 auto 12px" }} />
-            <p className="f-mono" style={{ fontSize: "0.7rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 16 }}>Markets Covered</p>
-          </div>
-          <h2 className={`f-display reveal rev-d1 ${marketsReveal.visible ? "in" : ""}`} style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "#E2DDD6", lineHeight: 1.15, letterSpacing: "-0.02em", textAlign: "center", margin: "0 auto 16px", maxWidth: 500 }}>
-            Real charts. Real setups.<br /><em style={{ color: "#7C6AFF", fontStyle: "italic" }}>Real time.</em>
-          </h2>
-          <p className={`f-sans reveal rev-d2 ${marketsReveal.visible ? "in" : ""}`} style={{ fontSize: "0.95rem", color: "#5A5470", lineHeight: 1.7, textAlign: "center", margin: "0 auto 56px", maxWidth: 500 }}>
-            HTRADES monitors the 8 most traded markets on the planet. Every signal comes from real price action, real charts, real opportunities.
-          </p>
-
-          {/* Featured chart */}
-          <div className={`card reveal rev-d3 ${marketsReveal.visible ? "in" : ""}`} style={{ padding: 32, marginBottom: 48 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div>
-                  <div className="f-display" style={{ fontSize: "1.8rem", color: "#E2DDD6", letterSpacing: "-0.02em" }}>XAU/USD</div>
-                  <div className="f-mono" style={{ fontSize: "0.7rem", color: "#3D3B52", letterSpacing: "0.08em" }}>Gold — 4H Timeframe</div>
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Signal</div>
+                    <div className="f-display" style={{ fontSize: "1.2rem", color: "#22C55E" }}>LONG</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Confidence</div>
+                    <div className="f-display" style={{ fontSize: "1.2rem", color: "#22C55E" }}>94%</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Risk Cap</div>
+                    <div className="f-display" style={{ fontSize: "1.2rem", color: "#7C6AFF" }}>≤ 20%</div>
+                  </div>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                <div style={{ textAlign: "center" }}>
-                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Current</div>
-                  <div className="f-display" style={{ fontSize: "1.2rem", color: "#E2DDD6" }}>2,342.50</div>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Signal</div>
-                  <div className="f-display" style={{ fontSize: "1.2rem", color: "#7C6AFF" }}>LONG</div>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#4A4862", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Confidence</div>
-                  <div className="f-display" style={{ fontSize: "1.2rem", color: "#22C55E" }}>94%</div>
-                </div>
+              <ChartMock />
+              <div style={{ display: "flex", gap: 24, marginTop: 20, flexWrap: "wrap" }}>
+                {[
+                  { label: "Sniper Entry", value: "2,342.50", color: "#E2DDD6" },
+                  { label: "Stop Loss", value: "2,338.00", color: "#FF5252" },
+                  { label: "Take Profit", value: "2,368.00", color: "#22C55E" },
+                  { label: "Risk/Reward", value: "1:4.0", color: "#7C6AFF" },
+                ].map((item) => (
+                  <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: item.color }} />
+                    <span className="f-mono" style={{ fontSize: "0.7rem", color: "#4A4862" }}>{item.label}:</span>
+                    <span className="f-mono" style={{ fontSize: "0.75rem", color: item.color, fontWeight: 600 }}>{item.value}</span>
+                  </div>
+                ))}
               </div>
             </div>
-            <CandlestickViz
-              color="#7C6AFF"
-              data={[
-                { open: 2340, close: 2330, high: 2345, low: 2325, green: false },
-                { open: 2330, close: 2338, high: 2342, low: 2328, green: true },
-                { open: 2338, close: 2325, high: 2340, low: 2320, green: false },
-                { open: 2325, close: 2335, high: 2338, low: 2322, green: true },
-                { open: 2335, close: 2328, high: 2340, low: 2324, green: false },
-                { open: 2328, close: 2340, high: 2344, low: 2326, green: true },
-                { open: 2340, close: 2332, high: 2345, low: 2330, green: false },
-                { open: 2332, close: 2345, high: 2348, low: 2330, green: true },
-                { open: 2345, close: 2338, high: 2350, low: 2335, green: false },
-                { open: 2338, close: 2348, high: 2352, low: 2336, green: true },
-                { open: 2348, close: 2340, high: 2352, low: 2338, green: false },
-                { open: 2340, close: 2350, high: 2354, low: 2338, green: true },
-                { open: 2350, close: 2342, high: 2355, low: 2340, green: false },
-                { open: 2342, close: 2352, high: 2356, low: 2340, green: true },
-                { open: 2352, close: 2345, high: 2358, low: 2342, green: false },
-                { open: 2345, close: 2355, high: 2360, low: 2344, green: true },
-                { open: 2355, close: 2348, high: 2360, low: 2346, green: false },
-                { open: 2348, close: 2360, high: 2364, low: 2346, green: true },
-                { open: 2360, close: 2352, high: 2364, low: 2350, green: false },
-                { open: 2352, close: 2365, high: 2368, low: 2350, green: true },
-              ]}
-            />
-            <div style={{ display: "flex", gap: 24, marginTop: 20, flexWrap: "wrap" }}>
-              {[
-                { label: "Entry", value: "2,342.50", color: "#E2DDD6" },
-                { label: "Stop Loss", value: "2,330.00", color: "#FF5252" },
-                { label: "Take Profit", value: "2,368.00", color: "#22C55E" },
-                { label: "Risk/Reward", value: "1:2.1", color: "#7C6AFF" },
-              ].map((item) => (
-                <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: item.color }} />
-                  <span className="f-mono" style={{ fontSize: "0.7rem", color: "#4A4862" }}>{item.label}:</span>
-                  <span className="f-mono" style={{ fontSize: "0.75rem", color: item.color, fontWeight: 600 }}>{item.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className={`reveal rev-d4 ${marketsReveal.visible ? "in" : ""}`} style={{ textAlign: "center", marginBottom: 40 }}>
-            <p className="f-mono" style={{ fontSize: "0.65rem", color: "#3D3B52", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 16 }}>ALL MARKETS MONITORED</p>
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 10 }}>
-              {markets.map(c => (
-                <span key={c} className="tag-pill">{c}</span>
-              ))}
-            </div>
-          </div>
-
-          <div className={`reveal rev-d5 ${marketsReveal.visible ? "in" : ""}`} style={{ textAlign: "center" }}>
-            <button className="btn-outline-accent">See All Markets <ArrowRight /></button>
           </div>
         </div>
       </section>
@@ -536,7 +451,7 @@ export default function HTradesLanding() {
               </h2>
             </div>
             <p className={`f-sans reveal rev-d3 ${featuresReveal.visible ? "in" : ""}`} style={{ fontSize: "1rem", color: "#5A5470", lineHeight: 1.7, maxWidth: 340 }}>
-              While you're scrolling forums and watching videos, HTRADES is already extracting the best setups and delivering them to you.
+              While others stare at charts for hours, HTRADES reads them for you — then hands you a disciplined plan with risk already managed.
             </p>
           </div>
 
@@ -556,7 +471,54 @@ export default function HTradesLanding() {
 
       <hr className="sep" />
 
-      <section style={{ padding: "100px 28px", background: "#080810", position: "relative" }}>
+      <section style={{ padding: "100px 28px", position: "relative" }}>
+        <div style={{ position: "absolute", top: "20%", left: "10%", width: 400, height: 300, background: "rgba(100,80,255,0.04)", borderRadius: "50%", filter: "blur(80px)", pointerEvents: "none" }} />
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 56 }}>
+            <div className="accent-line" style={{ margin: "0 auto 12px" }} />
+            <p className="f-mono" style={{ fontSize: "0.7rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 12 }}>Two Methodologies</p>
+            <h2 className="f-display" style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "#E2DDD6", lineHeight: 1.15, letterSpacing: "-0.02em", margin: "0 auto 16px" }}>
+              Pick your school.<br /><em style={{ color: "#7C6AFF", fontStyle: "italic" }}>We speak both.</em>
+            </h2>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, maxWidth: 860, margin: "0 auto" }}>
+            <div className="card c-hover" style={{ padding: 36 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <div className="icon-ring"><TargetIcon /></div>
+                <h3 className="f-display" style={{ fontSize: "1.4rem", color: "#E2DDD6", letterSpacing: "-0.01em" }}>SMC</h3>
+              </div>
+              <p className="f-sans" style={{ fontSize: "0.875rem", color: "#4A4862", lineHeight: 1.7, marginBottom: 20 }}>
+                Smart Money Concepts reads institutional footprints: order blocks, fair value gaps, liquidity sweeps, displacement and market structure.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {["Order Blocks", "FVG", "Liquidity Sweeps", "BOS / CHoCH", "Supply & Demand"].map(t => (
+                  <span key={t} className="tag-pill" style={{ fontSize: "0.62rem" }}>{t}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="card c-hover pricing-featured" style={{ padding: 36 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <div className="icon-ring" style={{ color: "#A855F7" }}><StarIcon /></div>
+                <h3 className="f-display" style={{ fontSize: "1.4rem", color: "#E2DDD6", letterSpacing: "-0.01em" }}>ICT</h3>
+              </div>
+              <p className="f-sans" style={{ fontSize: "0.875rem", color: "#4A4862", lineHeight: 1.7, marginBottom: 20 }}>
+                Inner Circle Trader builds the full narrative: liquidity pools, PD arrays, kill zones, OTE and premium/discount pricing.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {["Liquidity Pools", "PD Arrays", "OTE", "Kill Zones", "Power of Three"].map(t => (
+                  <span key={t} className="tag-pill" style={{ fontSize: "0.62rem" }}>{t}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <hr className="sep" />
+
+      <section id="how" style={{ padding: "100px 28px", background: "#080810", position: "relative" }}>
         <div style={{ position: "absolute", bottom: "10%", left: "15%", width: 400, height: 200, background: "rgba(100,80,255,0.04)", borderRadius: "50%", filter: "blur(80px)", pointerEvents: "none" }} />
         <div ref={stepsReveal.ref} style={{ maxWidth: 1120, margin: "0 auto" }}>
           <div className={`reveal ${stepsReveal.visible ? "in" : ""}`} style={{ marginBottom: 16, textAlign: "center" }}>
@@ -564,7 +526,7 @@ export default function HTradesLanding() {
             <p className="f-mono" style={{ fontSize: "0.7rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase" }}>How It Works</p>
           </div>
           <h2 className={`f-display reveal rev-d1 ${stepsReveal.visible ? "in" : ""}`} style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "#E2DDD6", lineHeight: 1.15, letterSpacing: "-0.02em", marginBottom: 60, maxWidth: 440, textAlign: "center", margin: "0 auto 60px" }}>
-            From scan to trade<br />in seconds.
+            From screenshot to setup<br />in seconds.
           </h2>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, position: "relative" }}>
@@ -602,14 +564,14 @@ export default function HTradesLanding() {
               <div className="f-display" style={{ fontSize: "3rem", color: "#E2DDD6", letterSpacing: "-0.02em", marginBottom: 4 }}>$0</div>
               <p className="f-mono" style={{ fontSize: "0.75rem", color: "#3A3852", marginBottom: 32 }}>Forever free.</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 32 }}>
-                {["3 markets monitored", "5 signals per day", "Basic alerts", "Standard delay (30s)"].map(item => (
+                {["5 chart analyses per day", "SMC & ICT analysis", "Entry, SL, TP & key levels", "20% risk guard & position size"].map(item => (
                   <div key={item} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ color: "#3A3852", flexShrink: 0 }}><CheckIcon /></div>
                     <span className="f-sans" style={{ fontSize: "0.875rem", color: "#4A4862" }}>{item}</span>
                   </div>
                 ))}
               </div>
-              <button className="btn-ghost" style={{ width: "100%", justifyContent: "center" }}>Get Started Free</button>
+              <Link href="/dashboard" className="btn-primary" style={{ width: "100%", justifyContent: "center", textDecoration: "none" }}>Analyze Free</Link>
             </div>
 
             <div className="card pricing-featured" style={{ padding: 36, position: "relative" }}>
@@ -618,7 +580,7 @@ export default function HTradesLanding() {
               <div className="f-display" style={{ fontSize: "3rem", color: "#E2DDD6", letterSpacing: "-0.02em", marginBottom: 4 }}>$19</div>
               <p className="f-mono" style={{ fontSize: "0.75rem", color: "#3A3852", marginBottom: 32 }}>per month.</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 32 }}>
-                {["All 8 markets monitored", "Unlimited signals", "Instant alerts (<3s)", "Push notifications", "Source accuracy tracking"].map(item => (
+                {["Unlimited chart analyses", "All instruments & timeframes", "Faster analysis queue", "Analysis history", "Priority support"].map(item => (
                   <div key={item} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ color: "#7C6AFF", flexShrink: 0 }}><CheckIcon /></div>
                     <span className="f-sans" style={{ fontSize: "0.875rem", color: "#7A748C" }}>{item}</span>
@@ -638,16 +600,16 @@ export default function HTradesLanding() {
             <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 600, height: 250, background: "rgba(100,80,255,0.08)", borderRadius: "50%", filter: "blur(70px)", pointerEvents: "none" }} />
             <div style={{ position: "relative", zIndex: 1 }}>
               <div className="accent-line" style={{ margin: "0 auto 18px" }} />
-              <p className="f-mono" style={{ fontSize: "0.7rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 24 }}>Stop Missing Trades</p>
+              <p className="f-mono" style={{ fontSize: "0.7rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 24 }}>Stop Guessing Entries</p>
               <h2 className="f-display" style={{ fontSize: "clamp(2.2rem, 5vw, 4rem)", color: "#E2DDD6", lineHeight: 1.1, letterSpacing: "-0.025em", maxWidth: 640, margin: "0 auto 20px" }}>
-                The market doesn't wait.<br /><em style={{ color: "#7C6AFF", fontStyle: "italic" }}>Neither should you.</em>
+                Your chart already has the setup.<br /><em style={{ color: "#7C6AFF", fontStyle: "italic" }}>Let the AI find it.</em>
               </h2>
               <p className="f-sans" style={{ fontSize: "1rem", color: "#5A5470", lineHeight: 1.7, maxWidth: 480, margin: "0 auto 40px" }}>
-                Join traders who let HTRADES do the scanning while they focus on executing. Real signals. Real time. Real results.
+                Screenshot, upload, and trade with a plan — entry, stop loss, take profit, and a risk guard that caps your downside at 20%.
               </p>
               <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-                <button className="btn-primary">Get Early Access <ArrowRight /></button>
-                <button className="btn-ghost">Learn More</button>
+                <Link href="/dashboard" className="btn-primary">Analyze Your First Chart <ArrowRight /></Link>
+                <a className="btn-ghost" href="#how">How It Works</a>
               </div>
             </div>
           </div>
@@ -665,7 +627,7 @@ export default function HTradesLanding() {
               >{item}</a>
             ))}
           </div>
-          <div className="f-mono" style={{ fontSize: "0.68rem", color: "#1F1E2A", letterSpacing: "0.06em" }}>© 2025 HTRADES. All rights reserved.</div>
+          <div className="f-mono" style={{ fontSize: "0.68rem", color: "#1F1E2A", letterSpacing: "0.06em" }}>© 2026 HTRADES. All rights reserved.</div>
         </div>
       </footer>
     </div>

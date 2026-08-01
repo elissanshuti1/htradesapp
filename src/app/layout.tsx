@@ -1,20 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-const plusJakarta = Plus_Jakarta_Sans({
-  variable: "--font-plus-jakarta",
-  subsets: ["latin"],
-});
+import AuthProvider from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
-  title: "HTRADES — Real-Time Trading Signal Scanner",
-  description: "Scan TradingView, YouTube, Forex Factory, Twitter & 20+ platforms. Get real-time trading setups with exact entry, stop loss, and take profit levels.",
+  title: "HTRADES — AI Chart Analysis · Sniper Entries (SMC & ICT)",
+  description: "Upload a TradingView screenshot and get an AI trade plan: sniper entry, entry, stop loss and take profit in SMC or ICT — with a built-in 20% risk guard.",
   icons: {
     icon: [
       { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
@@ -45,10 +35,8 @@ export default function RootLayout({
         <link rel="manifest" href="/site.webmanifest" />
         <meta name="theme-color" content="#0A0A0F" />
       </head>
-      <body
-        className={`${inter.variable} ${plusJakarta.variable} font-sans antialiased bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100`}
-      >
-        {children}
+      <body className="font-sans antialiased bg-[#0A0A0F] text-[#E2DDD6]">
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

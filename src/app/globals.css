@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-roboto-mono);
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-brand: #5046e4;
   --color-brand-light: #eef2ff;
@@ -24,8 +24,8 @@
 }
 
 body {
-  font-family: var(--font-sans, 'Inter', sans-serif);
-  background-color: #0c0c0c;
+  font-family: var(--font-sans, 'Inter', -apple-system, sans-serif);
+  background-color: #0a0a0f;
   color: #e8e4dc;
 }
 

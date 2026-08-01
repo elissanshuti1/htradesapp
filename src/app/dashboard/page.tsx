@@ -1,812 +1,733 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import AuthButton from "@/components/AuthButton";
 
-type Direction = "BUY" | "SELL";
-type Status = "active" | "expired" | "hit_tp" | "hit_sl";
-type Source = "tradingview" | "forexfactory" | "youtube" | "telegram" | "ai_fallback";
-type Outcome = "pending" | "hit_tp" | "hit_sl" | "expired" | "manual_close";
+type Methodology = "smc" | "ict";
 
-interface Signal {
-  _id: string;
-  source: Source;
-  pair: string;
-  direction: Direction;
+interface KeyLevel {
+  label: string;
+  price: string;
+  type: string;
+}
+
+interface PositionSize {
+  supported: boolean;
+  instrument: string;
+  lots: number;
+  riskAmount: number;
+  riskPercent: number;
+  actualLoss: number;
+  actualPercent: number;
+  pipLabel: string;
+  note: string;
+}
+
+interface ChartAnalysis {
+  instrument: string;
+  timeframe: string;
+  methodology: string;
+  direction: "BUY" | "SELL";
+  sniperEntry: number;
   entry: number;
   stopLoss: number;
   takeProfit: number;
-  slPips: number;
-  tpPips: number;
   riskReward: number;
   confidence: number;
-  reasoning: string;
-  sourceUrl: string;
-  sourceAuthor: string;
-  status: Status;
-  outcome: Outcome;
-  resultPips: number;
-  createdAt: string;
-  trustScore: number;
+  invalidation: string;
+  summary: string;
+  reasoning: string[];
+  keyLevels: KeyLevel[];
+  positionSize?: PositionSize;
+  riskCapApplied?: boolean;
+  demo?: boolean;
 }
 
-interface NewsItem {
-  _id: string;
-  pair: string;
-  news: string;
-  impact: string;
-  direction: Direction | "WAIT";
-  entry: number;
-  stopLoss: number;
-  takeProfit: number;
-  slPips: number;
-  tpPips: number;
-  riskReward: number;
-  confidence: number;
-  reasoning: string;
-  timestamp: string;
-}
-
-interface MarketAnalysis {
-  pair: string;
-  structure: string;
-  bias: "BULLISH" | "BEARISH" | "NEUTRAL";
-  keyLevels: { label: string; price: string; type: string }[];
-  reasoning: string;
-  setup: { direction: Direction | null; entry: string; sl: string; tp: string; rr: string } | null;
-}
-
-const MONITORED_PAIRS = ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD"];
-
-const sourceColors: Record<Source, string> = {
-  tradingview: "#7C6AFF",
-  forexfactory: "#FF9500",
-  youtube: "#FF0000",
-  telegram: "#229ED9",
-  ai_fallback: "#7C6AFF",
+const LEVEL_COLORS: Record<string, string> = {
+  liquidity: "#FF9500",
+  orderblock: "#A855F7",
+  fvg: "#3B82F6",
+  breaker: "#EC4899",
+  support: "#22C55E",
+  resistance: "#FF5252",
+  supply: "#FF5252",
+  demand: "#22C55E",
+  ote: "#7C6AFF",
+  premium: "#FF5252",
+  discount: "#22C55E",
+  bpr: "#14B8A6",
+  level: "#E2DDD6",
 };
 
-const sourceLabels: Record<Source, string> = {
-  tradingview: "TradingView",
-  forexfactory: "Forex Factory",
-  youtube: "YouTube",
-  telegram: "Telegram",
-  ai_fallback: "AI Analysis",
-};
-
-function formatTime(dateStr: string): string {
-  const now = new Date();
-  const date = new Date(dateStr);
-  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-function calcPips(pair: string, priceDiff: number): number {
-  if (pair === "XAU/USD") return priceDiff * 10;
-  if (pair.includes("JPY")) return priceDiff * 100;
-  return priceDiff * 10000;
-}
-
-function formatPips(pips: number, pair: string): string {
-  if (pair === "XAU/USD") return `$${Math.abs(pips).toFixed(1)}`;
-  return `${Math.abs(pips).toFixed(1)} pips`;
-}
-
-function getTVSymbol(pair: string): string {
-  const map: Record<string, string> = {
-    "XAU/USD": "OANDA:XAUUSD",
-    "EUR/USD": "FX:EURUSD",
-    "GBP/USD": "FX:GBPUSD",
-    "USD/JPY": "FX:USDJPY",
-    "AUD/USD": "FX:AUDUSD",
-    "USD/CAD": "FX:USDCAD",
-    "USD/CHF": "FX:USDCHF",
-    "NZD/USD": "FX:NZDUSD",
-  };
-  return map[pair] || "FX:EURUSD";
-}
-
-const ArrowUp = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 12V2M7 2L3 6M7 2L11 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const ArrowDown = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2V12M7 12L3 8M7 12L11 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const ExternalLinkIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M5 2H3C2.448 2 2 2.448 2 3V9C2 9.552 2.448 10 3 10H9C9.552 10 10 9.552 10 9V7M7 2H10M10 2V5M10 2L5 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const ChartIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 3V15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 11L10 8L13 10L16 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const SignalIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M12 2L6 9H10L8 16L15 9H11L12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const NewsIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="2" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M6 6H12M6 9H12M6 12H9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>);
-const SetupsIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M10 2L4 9H8L6 16L15 9H11L10 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 16H15" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>);
-const CloseIcon = () => (<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M5 5L15 15M15 5L5 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>);
-const MenuIcon = () => (<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5H17M3 10H17M3 15H17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>);
-const ShieldIcon = () => (<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1L2 3.5V7C2 10 4.5 12.5 7 13C9.5 12.5 12 10 12 7V3.5L7 1Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>);
-const CheckIcon = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7L5.5 10L11.5 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-const XMarkIcon = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>);
+const ArrowUp = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L4 7M8 3L12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const ArrowDown = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3V13M8 13L4 9M8 13L12 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const UploadIcon = () => (<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M11 15V4M11 4L7 8M11 4L15 8M4 15V17C4 17.6 4.4 18 5 18H17C17.6 18 18 17.6 18 17V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const TrashIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4H13M6.5 4V3C6.5 2.5 6.8 2 7.3 2H8.7C9.2 2 9.5 2.5 9.5 3V4M4.5 4L5 13C5 13.6 5.4 14 6 14H10C10.6 14 11 13.6 11 13L11.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const ScanIcon = () => (<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 8V5C3 4 4 3 5 3H8M14 3H17C18 3 19 4 19 5V8M19 14V17C19 18 18 19 17 19H14M8 19H5C4 19 3 18 3 17V14M7 11H15M7 8H15M7 14H11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>);
+const ShieldIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1.5L3 4V8.5C3 12 5.7 15.2 9 16C12.3 15.2 15 12 15 8.5V4L9 1.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M6.5 9L8.2 10.7L11.5 7.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const ZapIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M10.5 2L4.5 10H8L7 16L14 8H10L10.5 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>);
+const TargetIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.4"/><circle cx="9" cy="9" r="2.2" stroke="currentColor" strokeWidth="1.4"/><path d="M9 1V3M9 15V17M1 9H3M15 9H17" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>);
+const CandlesIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 2V4M4 14V16M4 5V13M2.5 4H5.5M2.5 14H5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><rect x="3.2" y="5" width="1.6" height="8" rx="0.4" fill="currentColor"/><path d="M12 1V3M12 15V17M12 4V14M10.5 3H13.5M10.5 15H13.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><rect x="11.2" y="4" width="1.6" height="10" rx="0.4" fill="currentColor"/></svg>);
+const CrosshairIcon = () => (<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" strokeWidth="1.4"/><path d="M9 0.5V5M9 13V17.5M0.5 9H5M13 9H17.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/></svg>);
+const RefreshIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 8C13 10.8 10.8 13 8 13C6.5 13 5.2 12.3 4.4 11.2M3 8C3 5.2 5.2 3 8 3C9.4 3 10.6 3.6 11.5 4.6M3 11V8H6M13 5V8H10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const LockIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5.5 7V5C5.5 3.3 6.6 2 8 2C9.4 2 10.5 3.3 10.5 5V7" stroke="currentColor" strokeWidth="1.4"/></svg>);
+const CloseIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>);
 const ClockIcon = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.3"/><path d="M7 4V7L9 8.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>);
-const TargetIcon = () => (<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.3"/><circle cx="7" cy="7" r="2" stroke="currentColor" strokeWidth="1.3"/><path d="M7 1V3M7 11V13M1 7H3M11 7H13" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>);
 
-function SignalCard({ sig }: { sig: Signal }) {
-  const slPips = sig.slPips || calcPips(sig.pair, Math.abs(sig.entry - sig.stopLoss));
-  const tpPips = sig.tpPips || calcPips(sig.pair, Math.abs(sig.takeProfit - sig.entry));
-  const dec = sig.pair === "XAU/USD" ? 2 : sig.pair.includes("JPY") ? 3 : 5;
+function decimalsFor(instrument: string): number {
+  const i = (instrument || "").toUpperCase().replace(/[\s/\\-]/g, "");
+  if (i === "XAUUSD" || i === "GOLD") return 2;
+  if (i.includes("JPY")) return 3;
+  return 5;
+}
 
+function fmt(n: number, instrument: string): string {
+  if (!isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: decimalsFor(instrument), maximumFractionDigits: decimalsFor(instrument) });
+}
+
+function ConfidenceRing({ value }: { value: number }) {
+  const r = 26;
+  const c = 2 * Math.PI * r;
+  const off = c - (value / 100) * c;
+  const color = value >= 75 ? "#22C55E" : value >= 55 ? "#FF9500" : "#FF5252";
   return (
-    <div className="signal-card fade-in" data-trust={sig.trustScore >= 70 ? "high" : sig.trustScore >= 50 ? "mid" : "low"}>
-      <div className="signal-header">
-        <div className="signal-pair-section">
-          <span className="signal-pair" style={{ color: sig.pair === "XAU/USD" ? "#FFD700" : "#E2DDD6" }}>{sig.pair}</span>
-          <span className={`signal-direction ${sig.direction === "BUY" ? "dir-buy" : "dir-sell"}`}>
-            {sig.direction === "BUY" ? <ArrowUp /> : <ArrowDown />}{sig.direction}
-          </span>
-        </div>
-        <div className="signal-meta">
-          <span className="signal-trust">
-            <ShieldIcon />
-            {sig.trustScore}%
-          </span>
-          <span className="signal-time">{formatTime(sig.createdAt)}</span>
-        </div>
-      </div>
-
-      <div className="signal-prices">
-        <div className="price-block">
-          <span className="price-label">Entry</span>
-          <span className="price-value">{sig.entry.toFixed(dec)}</span>
-        </div>
-        <div className="price-block price-sl">
-          <span className="price-label">Stop Loss</span>
-          <span className="price-value">{sig.stopLoss.toFixed(dec)}</span>
-          <span className="price-pips">{formatPips(slPips, sig.pair)}</span>
-        </div>
-        <div className="price-block price-tp">
-          <span className="price-label">Take Profit</span>
-          <span className="price-value">{sig.takeProfit.toFixed(dec)}</span>
-          <span className="price-pips">{formatPips(tpPips, sig.pair)}</span>
-        </div>
-        <div className="price-block">
-          <span className="price-label">R:R</span>
-          <span className="price-value price-rr">1 : {sig.riskReward}</span>
-        </div>
-      </div>
-
-      <div className="signal-reasoning">
-        {sig.reasoning}
-      </div>
-
-      <div className="signal-footer">
-        <span className="signal-source" style={{ borderColor: `${sourceColors[sig.source]}44`, color: sourceColors[sig.source], background: `${sourceColors[sig.source]}11` }}>{sourceLabels[sig.source]}</span>
-        {sig.sourceAuthor && <span className="signal-author">by {sig.sourceAuthor}</span>}
-        {sig.sourceUrl && (
-          <a href={sig.sourceUrl} target="_blank" rel="noopener noreferrer" className="signal-link"><ExternalLinkIcon /></a>
-        )}
+    <div style={{ position: "relative", width: 80, height: 80, flexShrink: 0 }}>
+      <svg width="80" height="80" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r={r} fill="none" stroke="#1A1929" strokeWidth="5" />
+        <circle cx="32" cy="32" r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 32 32)" />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+        <span className="f-display" style={{ fontSize: "1.05rem", color, lineHeight: 1.1 }}>{value}%</span>
+        <span className="f-mono" style={{ fontSize: "0.42rem", color: "#3D3B52", letterSpacing: "0.08em", textTransform: "uppercase" }}>confidence</span>
       </div>
     </div>
   );
 }
 
-function SetupCard({ setup }: { setup: Signal }) {
-  const isWon = setup.outcome === "hit_tp";
-  const isLost = setup.outcome === "hit_sl";
-  const isExpired = setup.outcome === "expired" || setup.status === "expired";
-  const isRunning = setup.outcome === "pending";
-  const dec = setup.pair === "XAU/USD" ? 2 : setup.pair.includes("JPY") ? 3 : 5;
+function fileToCompressedDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1280;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("Canvas unsupported"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image"));
+    };
+    img.src = url;
+  });
+}
 
-  const resultPips = setup.resultPips || 0;
-  const hasResult = resultPips !== 0 && !isNaN(resultPips);
-
-  return (
-    <div className="setup-card fade-in" data-outcome={isWon ? "won" : isLost ? "lost" : isExpired ? "expired" : "running"}>
-      <div className="setup-header">
-        <div className="setup-pair-section">
-          <span className="setup-pair">{setup.pair}</span>
-          <span className={`setup-direction ${setup.direction === "BUY" ? "dir-buy" : "dir-sell"}`}>{setup.direction}</span>
-        </div>
-        <div className="setup-outcome">
-          {isWon && <span className="outcome-badge won"><CheckIcon /> Won</span>}
-          {isLost && <span className="outcome-badge lost"><XMarkIcon /> Lost</span>}
-          {isExpired && <span className="outcome-badge expired"><ClockIcon /> Expired</span>}
-          {!isWon && !isLost && !isExpired && <span className="outcome-badge running"><ClockIcon /> Running</span>}
-        </div>
-      </div>
-
-      <div className="setup-prices">
-        <span>Entry: <b>{setup.entry.toFixed(dec)}</b></span>
-        <span>SL: <b style={{ color: "#FF5252" }}>{setup.stopLoss.toFixed(dec)}</b></span>
-        <span>TP: <b style={{ color: "#22C55E" }}>{setup.takeProfit.toFixed(dec)}</b></span>
-        <span style={{ color: "#7C6AFF" }}>R:R 1:{setup.riskReward}</span>
-      </div>
-
-      {hasResult && (
-        <div className="setup-result" style={{ color: resultPips > 0 ? "#22C55E" : "#FF5252" }}>
-          {resultPips > 0 ? "+" : ""}{formatPips(resultPips, setup.pair)}
-        </div>
-      )}
-
-      <div className="setup-footer">
-        <span className="setup-source" style={{ color: sourceColors[setup.source] }}>{sourceLabels[setup.source]}</span>
-        <span className="setup-time">{formatTime(setup.createdAt)}</span>
-      </div>
-    </div>
-  );
+interface RecentItem {
+  instrument: string;
+  methodology: string;
+  direction: string;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+  confidence: number;
+  time: number;
 }
 
 export default function Dashboard() {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [setups, setSetups] = useState<Signal[]>([]);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activePage, setActivePage] = useState("signals");
-  const [selectedMarket, setSelectedMarket] = useState("XAU/USD");
-  const [chartLoading, setChartLoading] = useState(true);
-  const [marketAnalysis, setMarketAnalysis] = useState<MarketAnalysis | null>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-  const tvScriptLoadedRef = useRef(false);
-  const scrapingRef = useRef(false);
-
-  const fetchSignals = useCallback(async () => {
-    try {
-      const res = await fetch("/api/signals?limit=100");
-      const data = await res.json();
-      if (data.signals) {
-        setSignals(data.signals);
-        setLastUpdate(new Date());
-      }
-    } catch (e) {
-      console.error("[HTRADES] fetchSignals error:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchSetups = useCallback(async () => {
-    try {
-      const res = await fetch("/api/setups?limit=200");
-      const data = await res.json();
-      if (data.setups) setSetups(data.setups);
-    } catch (e) {
-      console.error("[HTRADES] fetchSetups error:", e);
-    }
-  }, []);
-
-  const fetchNews = useCallback(async () => {
-    setNewsLoading(true);
-    try {
-      const res = await fetch("/api/news");
-      const data = await res.json();
-      setNews(data.analyses || []);
-    } catch (e) {
-      console.error("[HTRADES] fetchNews error:", e);
-    } finally {
-      setNewsLoading(false);
-    }
-  }, []);
-
-  const triggerScrape = useCallback(async () => {
-    if (scrapingRef.current) return;
-    scrapingRef.current = true;
-    try {
-      const res = await fetch("/api/trigger-scrape", { method: "POST" });
-      if (!res.ok) {
-        console.error("[HTRADES] triggerScrape failed:", res.status, res.statusText);
-        return;
-      }
-      const data = await res.json();
-      console.log("[HTRADES] Scrape complete:", data.totalFound, "signals found,", data.saved, "saved, fallback:", data.fallbackUsed);
-      if (data.errors?.length > 0) {
-        console.warn("[HTRADES] Scrape errors:", data.errors);
-      }
-      await fetchSignals();
-    } catch (e) {
-      console.error("[HTRADES] triggerScrape error:", e);
-    } finally {
-      scrapingRef.current = false;
-    }
-  }, [fetchSignals]);
-
-  const fetchMarketAnalysis = useCallback(async (pair: string) => {
-    setAnalysisLoading(true);
-    setMarketAnalysis(null);
-    try {
-      const res = await fetch(`/api/market-analysis?pair=${encodeURIComponent(pair)}`);
-      const data = await res.json();
-      if (data.analysis) setMarketAnalysis(data.analysis);
-    } catch (e) {
-      console.error("[HTRADES] fetchMarketAnalysis error:", e);
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }, []);
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [imageName, setImageName] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const [methodology, setMethodology] = useState<Methodology | null>(null);
+  const [balanceInput, setBalanceInput] = useState("1000");
+  const balance = isFinite(parseFloat(balanceInput)) ? Math.max(0, parseFloat(balanceInput)) : 0;
+  const [riskPercent, setRiskPercent] = useState(2);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState<ChartAnalysis | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<RecentItem[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchSignals();
-    fetchSetups();
-    fetchNews();
-    triggerScrape();
-    const signalInterval = setInterval(fetchSignals, 5000);
-    const setupsInterval = setInterval(fetchSetups, 30000);
-    const newsInterval = setInterval(fetchNews, 60000);
-    const scrapeInterval = setInterval(() => triggerScrape(), 120000);
-    const priceInterval = setInterval(async () => {
-      try { await fetch("/api/check-prices"); } catch (e) { console.error("[HTRADES] check-prices error:", e); }
-    }, 30000);
-    return () => {
-      clearInterval(signalInterval);
-      clearInterval(setupsInterval);
-      clearInterval(newsInterval);
-      clearInterval(scrapeInterval);
-      clearInterval(priceInterval);
-    };
-  }, [fetchSignals, fetchSetups, fetchNews, triggerScrape]);
+    try {
+      const items = JSON.parse(localStorage.getItem("htrades-recent") || "[]");
+      if (Array.isArray(items)) setRecent(items.slice(0, 5));
+    } catch {}
+  }, []);
 
-  useEffect(() => {
-    if (activePage === "markets") {
-      setChartLoading(true);
-      loadTradingViewChart(selectedMarket);
-      fetchMarketAnalysis(selectedMarket);
+  const handleFile = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file (PNG, JPG).");
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePage, selectedMarket]);
+    setError(null);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      setImageDataUrl(dataUrl);
+      setImageName(file.name);
+      setResult(null);
+    } catch {
+      setError("Could not read that image. Try another screenshot.");
+    }
+  }, []);
 
-  const loadTradingViewChart = (pair: string) => {
-    const container = document.getElementById("tv-chart-container");
-    if (!container) return;
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><div class="pulse" style="width:40px;height:40px;border:3px solid #7C6AFF;border-radius:50%;border-top-color:transparent;"></div></div>';
-    setChartLoading(true);
-    const loadWidget = () => {
-      if ((window as any).TradingView) {
-        container.innerHTML = "";
-        new (window as any).TradingView.widget({
-          autosize: true,
-          symbol: getTVSymbol(pair),
-          interval: "60",
-          timezone: "Etc/UTC",
-          theme: "dark",
-          style: "1",
-          locale: "en",
-          toolbar_bg: "#0A0A0F",
-          enable_publishing: false,
-          allow_symbol_change: true,
-          hide_top_toolbar: false,
-          hide_legend: false,
-          save_image: false,
-          container_id: "tv-chart-container",
-          backgroundColor: "#0A0A0F",
-          gridColor: "#1A1929",
-        });
-        setChartLoading(false);
-      } else {
-        setTimeout(loadWidget, 500);
-      }
-    };
-    if (!tvScriptLoadedRef.current) {
-      const script = document.createElement("script");
-      script.src = "https://s3.tradingview.com/tv.js";
-      script.async = true;
-      script.onload = loadWidget;
-      script.onerror = () => {
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:gap:8px;"><span class="f-mono" style="color:#3D3B52;">Chart failed to load. Refresh page.</span></div>';
-        setChartLoading(false);
+  const saveRecent = useCallback((a: ChartAnalysis) => {
+    try {
+      const items: RecentItem[] = JSON.parse(localStorage.getItem("htrades-recent") || "[]");
+      const entry: RecentItem = {
+        instrument: a.instrument,
+        methodology: a.methodology,
+        direction: a.direction,
+        entry: a.entry,
+        stopLoss: a.stopLoss,
+        takeProfit: a.takeProfit,
+        confidence: a.confidence,
+        time: Date.now(),
       };
-      document.head.appendChild(script);
-      tvScriptLoadedRef.current = true;
-    } else {
-      loadWidget();
+      const next = [entry, ...items.filter((x) => x.instrument !== entry.instrument || x.entry !== entry.entry)].slice(0, 5);
+      localStorage.setItem("htrades-recent", JSON.stringify(next));
+      setRecent(next);
+    } catch {}
+  }, []);
+
+  const analyze = useCallback(async () => {
+    if (!imageDataUrl || !methodology || analyzing) return;
+    setAnalyzing(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch("/api/analyze-chart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: imageDataUrl,
+          methodology,
+          accountBalance: balance,
+          riskPercent: Math.min(20, riskPercent),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok && !data.analysis) {
+        setError(data.error || "Analysis failed. Please try again.");
+      } else {
+        setResult(data.analysis);
+        saveRecent(data.analysis);
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setAnalyzing(false);
     }
-  };
+  }, [imageDataUrl, methodology, analyzing, balance, riskPercent, saveRecent]);
 
-  const buyCount = signals.filter(s => s.direction === "BUY").length;
-  const sellCount = signals.filter(s => s.direction === "SELL").length;
-  const avgTrust = signals.length > 0 ? Math.round(signals.reduce((a, b) => a + b.trustScore, 0) / signals.length) : 0;
-  const highTrust = signals.filter(s => s.trustScore >= 70).length;
-  const runningSetups = setups.filter(s => s.outcome === "pending");
-  const endedSetups = setups.filter(s => s.outcome === "hit_tp" || s.outcome === "hit_sl");
-  const succeededCount = endedSetups.filter(s => s.outcome === "hit_tp").length;
-  const failedCount = endedSetups.filter(s => s.outcome === "hit_sl").length;
-  const runningCount = runningSetups.length;
-  const winRate = (succeededCount + failedCount) > 0 ? Math.round((succeededCount / (succeededCount + failedCount)) * 100) : 0;
+  const reset = useCallback(() => {
+    setResult(null);
+    setError(null);
+  }, []);
 
-  const navItems = [
-    { id: "signals", label: "Trending Signals", icon: <SignalIcon /> },
-    { id: "markets", label: "Market Analysis", icon: <ChartIcon /> },
-    { id: "setups", label: "Setups", icon: <SetupsIcon /> },
-    { id: "ended", label: "Ended Setups", icon: <ClockIcon /> },
-    { id: "news", label: "News Impact", icon: <NewsIcon /> },
-  ];
+  const effectiveRisk = Math.min(20, riskPercent);
+  const maxLoss = balance > 0 ? (balance * effectiveRisk) / 100 : 0;
+  const canAnalyze = Boolean(imageDataUrl && methodology && !analyzing);
+
+  const dec = result ? decimalsFor(result.instrument) : 5;
+  const buy = result?.direction === "BUY";
+  const confidenceColor = result ? (result.confidence >= 75 ? "#22C55E" : result.confidence >= 55 ? "#FF9500" : "#FF5252") : "#7C6AFF";
+
+  const riskDistance = result ? Math.abs(result.entry - result.stopLoss) : 0;
+  const rewardDistance = result ? Math.abs(result.takeProfit - result.entry) : 0;
 
   return (
-    <div className="flex min-h-screen bg-[#0A0A0F] text-[#E2DDD6]">
+    <div className="min-h-screen bg-[#0A0A0F] text-[#E2DDD6]" style={{ position: "relative", overflowX: "hidden" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
         .f-sans { font-family: 'Inter', -apple-system, sans-serif; }
+        .f-display { font-family: 'Syne', sans-serif; }
         .f-mono { font-family: 'JetBrains Mono', monospace; }
-        .card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 12px; }
-        .pulse { animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
-        .fade-in { animation: fadeIn 0.3s ease-out; }
-        .nav-item { transition: all 0.15s; cursor: pointer; border-radius: 8px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
-        .nav-item:hover { background: #1A1929; }
-        .nav-item.active { background: #7C6AFF18; color: #7C6AFF; }
-        .scrollbar-thin::-webkit-scrollbar { width: 4px; }
-        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-        .scrollbar-thin::-webkit-scrollbar-thumb { background: #1A1929; border-radius: 4px; }
-
-        .signal-card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 12px; overflow: hidden; transition: border-color 0.15s; }
-        .signal-card:hover { border-color: #7C6AFF33; }
-        .signal-card[data-trust="high"] { border-left: 3px solid #22C55E; }
-        .signal-card[data-trust="mid"] { border-left: 3px solid #FF9500; }
-        .signal-card[data-trust="low"] { border-left: 3px solid #FF5252; }
-        .signal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 12px; }
-        .signal-pair-section { display: flex; align-items: center; gap: 10px; }
-        .signal-pair { font-family: 'Inter', sans-serif; font-size: 1.15rem; font-weight: 700; }
-        .signal-direction { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 700; padding: 4px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; }
-        .dir-buy { background: #22C55E18; color: #22C55E; }
-        .dir-sell { background: #FF525218; color: #FF5252; }
-        .signal-meta { display: flex; align-items: center; gap: 12px; }
-        .signal-trust { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 600; color: #E2DDD6; display: flex; align-items: center; gap: 4px; }
-        .signal-time { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: #3D3B52; }
-        .signal-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 0; margin: 0 20px; border-top: 1px solid #1A1929; border-bottom: 1px solid #1A1929; }
-        .price-block { padding: 12px 16px; border-right: 1px solid #1A1929; }
-        .price-block:last-child { border-right: none; }
-        .price-label { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: #3D3B52; text-transform: uppercase; letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
-        .price-value { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #E2DDD6; display: block; }
-        .price-pips { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; display: block; margin-top: 2px; }
-        .price-sl .price-value { color: #FF5252; }
-        .price-sl .price-pips { color: #FF525288; }
-        .price-tp .price-value { color: #22C55E; }
-        .price-tp .price-pips { color: #22C55E88; }
-        .price-rr { color: #7C6AFF !important; }
-        .signal-reasoning { margin: 12px 20px; padding: 10px 14px; background: #0A0A0F; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: #6A6480; line-height: 1.6; }
-        .signal-footer { display: flex; align-items: center; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid #1A1929; }
-        .signal-source { font-family: 'JetBrains Mono', monospace; font-size: 0.58rem; padding: 3px 8px; border-radius: 4px; border: 1px solid; font-weight: 500; }
-        .signal-author { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: #4A4862; }
-        .signal-link { margin-left: auto; color: #3D3B52; transition: color 0.15s; }
-        .signal-link:hover { color: #7C6AFF; }
-
-        .news-card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 12px; overflow: hidden; }
-        .news-card[data-impact="high"] { border-left: 3px solid #FF5252; }
-        .news-card[data-impact="medium"] { border-left: 3px solid #FF9500; }
-        .news-card[data-impact="low"] { border-left: 3px solid #3D3B52; }
-        .news-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 10px; }
-        .news-pair-section { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .news-pair { font-family: 'Inter', sans-serif; font-size: 1rem; font-weight: 700; }
-        .news-impact-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.58rem; font-weight: 600; padding: 3px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; }
-        .impact-high { background: #FF525218; color: #FF5252; }
-        .impact-medium { background: #FF950018; color: #FF9500; }
-        .impact-bullish { background: #22C55E18; color: #22C55E; }
-        .impact-bearish { background: #FF525218; color: #FF5252; }
-        .impact-neutral { background: #3D3B5218; color: #3D3B52; }
-        .news-time { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: #3D3B52; }
-        .news-impact-label { margin: 0 18px 10px; padding: 8px 12px; background: #0A0A0F; border-radius: 6px; }
-        .impact-text { font-family: 'Inter', sans-serif; font-size: 0.75rem; font-weight: 500; }
-        .impact-text.bullish { color: #22C55E; }
-        .impact-text.bearish { color: #FF5252; }
-        .impact-text.neutral { color: #3D3B52; }
-        .news-setup-row { display: flex; gap: 16px; padding: 0 18px 10px; flex-wrap: wrap; }
-        .news-setup-item { display: flex; flex-direction: column; gap: 2px; }
-        .news-setup-item span { font-family: 'JetBrains Mono', monospace; font-size: 0.5rem; color: #3D3B52; text-transform: uppercase; }
-        .news-setup-item b { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
-        .news-reasoning { margin: 0 18px 10px; padding: 10px 14px; background: #0A0A0F; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: #6A6480; line-height: 1.6; }
-        .news-footer { padding: 8px 18px 12px; border-top: 1px solid #1A1929; font-family: 'JetBrains Mono', monospace; font-size: 0.52rem; color: #3D3B52; }
-
-        .setup-card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 10px; overflow: hidden; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-        .setup-card[data-outcome="won"] { border-left: 3px solid #22C55E; }
-        .setup-card[data-outcome="lost"] { border-left: 3px solid #FF5252; }
-        .setup-card[data-outcome="running"] { border-left: 3px solid #7C6AFF; }
-        .setup-card[data-outcome="expired"] { border-left: 3px solid #3D3B52; }
-        .setup-pair-section { display: flex; align-items: center; gap: 8px; }
-        .setup-pair { font-family: 'Inter', sans-serif; font-size: 0.9rem; font-weight: 600; }
-        .outcome-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 4px; }
-        .outcome-badge.won { background: #22C55E18; color: #22C55E; }
-        .outcome-badge.lost { background: #FF525218; color: #FF5252; }
-        .outcome-badge.running { background: #7C6AFF18; color: #7C6AFF; }
-        .outcome-badge.expired { background: #3D3B5218; color: #3D3B52; }
-        .setup-prices { display: flex; align-items: center; gap: 16px; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #5A5470; }
-        .setup-result { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 700; }
-        .setup-footer { display: flex; align-items: center; gap: 12px; }
-        .setup-source { font-family: 'JetBrains Mono', monospace; font-size: 0.58rem; font-weight: 500; }
-        .setup-time { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: #3D3B52; }
-
-        .stat-card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 12px; padding: 16px 20px; }
-        .stat-label { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: #3D3B52; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
-        .stat-value { font-family: 'Inter', sans-serif; font-size: 1.5rem; font-weight: 700; }
+        .card { background: #0F0E18; border: 1px solid #1A1929; border-radius: 16px; position: relative; }
+        .card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background: linear-gradient(90deg, transparent, #7C6AFF22, transparent); }
+        .card > * { position: relative; z-index: 1; }
+        .glow { position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+        .fade-up { animation: fadeUp 0.4s ease-out; }
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.45;transform:scale(0.75)} }
+        .pulse { animation: pulse 1.6s ease-in-out infinite; }
+        @keyframes scanLine { 0%{top:0} 50%{top:calc(100% - 3px)} 100%{top:0} }
+        .scan-line { position:absolute; left:0; right:0; height:3px; background: linear-gradient(90deg, transparent, #7C6AFF, transparent); box-shadow: 0 0 18px rgba(124,106,255,0.8); animation: scanLine 2.2s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.9s linear infinite; }
+        .btn-primary { background:#7C6AFF; color:#fff; border:none; border-radius:12px; font-family:'Syne',sans-serif; font-weight:600; font-size:0.95rem; padding:15px 20px; cursor:pointer; transition:all .2s; display:inline-flex; align-items:center; justify-content:center; gap:10px; }
+        .btn-primary:hover:not(:disabled) { background:#6A58EE; transform:translateY(-1px); box-shadow:0 10px 30px rgba(124,106,255,0.35); }
+        .btn-primary:disabled { opacity:0.35; cursor:not-allowed; }
+        .btn-ghost { background:transparent; color:#6A6480; border:1px solid #1F1E2A; border-radius:12px; font-family:'Syne',sans-serif; font-weight:600; font-size:0.85rem; padding:12px 18px; cursor:pointer; transition:all .2s; display:inline-flex; align-items:center; gap:8px; }
+        .btn-ghost:hover { color:#E2DDD6; border-color:#3A3850; }
+        .nav-pill { font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.08em; text-transform:uppercase; padding:5px 11px; border-radius:6px; display:inline-flex; align-items:center; gap:5px; }
+        input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+        input[type=number] { -moz-appearance:textfield; }
+        input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:4px; background:#1A1929; outline:none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:#7C6AFF; border:3px solid #0F0E18; box-shadow:0 0 0 1px #7C6AFF, 0 0 14px rgba(124,106,255,0.5); cursor:pointer; }
+        input[type=range]::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#7C6AFF; border:3px solid #0F0E18; cursor:pointer; }
       `}</style>
 
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 md:hidden" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setSidebarOpen(false)} />
-      )}
+      <div className="glow" style={{ top: -120, left: "20%", width: 500, height: 300, background: "rgba(100,80,255,0.10)" }} />
+      <div className="glow" style={{ top: 200, right: "-10%", width: 400, height: 300, background: "rgba(60,120,255,0.06)" }} />
 
-      <aside className={`fixed md:sticky top-0 left-0 h-screen z-50 md:z-auto w-60 flex flex-col transition-transform duration-300 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`} style={{ background: "#0F0E18", borderRight: "1px solid #1A1929" }}>
-        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid #1A1929" }}>
-          <div className="f-sans" style={{ fontSize: "1.2rem", fontWeight: 700, color: "#E2DDD6" }}>H<span style={{ color: "#7C6AFF" }}>TRADES</span></div>
-          <button className="md:hidden" style={{ color: "#5A5470", background: "none", border: "none", cursor: "pointer" }} onClick={() => setSidebarOpen(false)}><CloseIcon /></button>
-        </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map(item => (
-            <div key={item.id} className={`nav-item f-sans ${activePage === item.id ? "active" : ""}`} style={{ color: activePage === item.id ? "#7C6AFF" : "#5A5470", fontSize: "0.82rem", fontWeight: 500 }} onClick={() => { setActivePage(item.id); setSidebarOpen(false); }}>
-              {item.icon}{item.label}
-            </div>
-          ))}
-        </nav>
-        <div className="px-4 py-3" style={{ borderTop: "1px solid #1A1929" }}>
-          <div className="card p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="pulse" style={{ width: 6, height: 6, background: "#22C55E", borderRadius: "50%" }} />
-              <span className="f-mono" style={{ fontSize: "0.55rem", color: "#22C55E", letterSpacing: "0.08em" }}>LIVE</span>
-            </div>
-            <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52" }}>
-              {lastUpdate ? `Updated ${formatTime(lastUpdate.toISOString())}` : "Waiting..."}
-            </div>
+      <header className="f-sans sticky top-0 z-40" style={{ background: "rgba(10,10,15,0.9)", backdropFilter: "blur(14px)", borderBottom: "1px solid #13121C" }}>
+        <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 24px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <a href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
+            <div style={{ width: 30, height: 30, borderRadius: 9, background: "#7C6AFF", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: "0.95rem" }}>H</div>
+            <span style={{ fontSize: "1.15rem", fontWeight: 700, color: "#E2DDD6", letterSpacing: "-0.01em" }}>HT<span style={{ color: "#7C6AFF" }}>RADES</span></span>
+          </a>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="nav-pill" style={{ color: "#22C55E", background: "#22C55E10", border: "1px solid #22C55E22" }}>
+              <span className="pulse" style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E", display: "inline-block" }} />
+              Sniper Entry AI
+            </span>
+            <AuthButton />
           </div>
         </div>
-      </aside>
+      </header>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="f-sans flex items-center gap-4 px-4 md:px-6 py-3" style={{ borderBottom: "1px solid #13121C", position: "sticky", top: 0, zIndex: 30, background: "rgba(10,10,15,0.92)", backdropFilter: "blur(14px)" }}>
-          <button className="md:hidden" style={{ color: "#5A5470", background: "none", border: "none", cursor: "pointer" }} onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
-          <div className="f-sans" style={{ fontSize: "0.95rem", fontWeight: 600, color: "#E2DDD6" }}>
-            {activePage === "signals" ? "Trending Signals" : activePage === "setups" ? "Setups" : activePage === "ended" ? "Ended Setups" : activePage === "news" ? "News Impact" : "Market Analysis"}
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="pulse" style={{ width: 6, height: 6, background: "#22C55E", borderRadius: "50%" }} />
-              <span className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", letterSpacing: "0.05em" }}>REAL-TIME</span>
+      <main style={{ maxWidth: 1240, margin: "0 auto", padding: "44px 24px 80px", position: "relative", zIndex: 1 }}>
+        <section style={{ textAlign: "center", marginBottom: 40 }}>
+          <h1 className="f-display fade-up" style={{ fontSize: "clamp(1.9rem, 4vw, 3rem)", lineHeight: 1.15, letterSpacing: "-0.02em", marginBottom: 14 }}>
+            Upload a chart. <em style={{ color: "#7C6AFF", fontStyle: "italic" }}>Get your sniper entry.</em>
+          </h1>
+          <p className="f-sans" style={{ fontSize: "1rem", color: "#6A6480", maxWidth: 560, margin: "0 auto", lineHeight: 1.7 }}>
+            Drop a TradingView screenshot, pick <b style={{ color: "#E2DDD6" }}>SMC</b> or <b style={{ color: "#E2DDD6" }}>ICT</b>, and the AI reads the structure to give you the entry, stop loss and take profit — with a hard guard so you never risk more than 20% of your account.
+          </p>
+        </section>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <div className="lg:col-span-2 space-y-5">
+            <div className="card" style={{ padding: 20 }}>
+              <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                <UploadIcon /> 1 · Upload Chart
+              </div>
+
+              {!imageDataUrl ? (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="f-sans"
+                  style={{
+                    border: `2px dashed ${dragging ? "#7C6AFF" : "#1F1E2A"}`,
+                    borderRadius: 14,
+                    padding: "38px 20px",
+                    textAlign: "center",
+                    cursor: "pointer",
+                    transition: "border-color 0.2s, background 0.2s",
+                    background: dragging ? "#7C6AFF0D" : "transparent",
+                  }}
+                >
+                  <div style={{ color: dragging ? "#7C6AFF" : "#3D3B52", marginBottom: 12, display: "flex", justifyContent: "center" }}><UploadIcon /></div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#A09A92", marginBottom: 6 }}>Drop your chart screenshot here</div>
+                  <div className="f-mono" style={{ fontSize: "0.65rem", color: "#3D3B52" }}>or click to browse — PNG / JPG / WEBP</div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid #1A1929", marginBottom: 12 }}>
+                    <img src={imageDataUrl} alt="Uploaded chart" style={{ width: "100%", display: "block" }} />
+                    <div style={{ position: "absolute", inset: "auto 10px 10px auto", display: "flex", gap: 6 }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                        className="btn-ghost"
+                        style={{ padding: "6px 10px", fontSize: "0.62rem", background: "rgba(10,10,15,0.8)", backdropFilter: "blur(6px)" }}
+                      >Replace</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setImageDataUrl(null); setImageName(""); setResult(null); }}
+                        className="btn-ghost"
+                        style={{ padding: "6px 10px", fontSize: "0.62rem", background: "rgba(10,10,15,0.8)", backdropFilter: "blur(6px)", color: "#FF5252", borderColor: "#FF525233" }}
+                      ><TrashIcon /></button>
+                    </div>
+                  </div>
+                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#3D3B52", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{imageName}</div>
+                </div>
+              )}
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
             </div>
+
+            <div className="card" style={{ padding: 20 }}>
+              <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                <CrosshairIcon /> 2 · Choose Strategy
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  onClick={() => setMethodology("smc")}
+                  className="f-sans"
+                  style={{
+                    textAlign: "left",
+                    borderRadius: 12,
+                    padding: "16px 16px",
+                    cursor: "pointer",
+                    background: methodology === "smc" ? "#7C6AFF12" : "transparent",
+                    border: `1.5px solid ${methodology === "smc" ? "#7C6AFF" : "#1A1929"}`,
+                    transition: "all 0.2s",
+                    color: "#E2DDD6",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 9, background: methodology === "smc" ? "#7C6AFF22" : "#13121E", color: methodology === "smc" ? "#7C6AFF" : "#3D3B52", display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${methodology === "smc" ? "#7C6AFF44" : "#1F1E2A"}` }}><CandlesIcon /></div>
+                    <span className="f-display" style={{ fontSize: "0.95rem", fontWeight: 600 }}>SMC</span>
+                  </div>
+                  <div className="f-sans" style={{ fontSize: "0.72rem", color: "#6A6480", lineHeight: 1.55 }}>Smart Money Concepts — order blocks, FVGs, liquidity sweeps & market structure.</div>
+                </button>
+                <button
+                  onClick={() => setMethodology("ict")}
+                  className="f-sans"
+                  style={{
+                    textAlign: "left",
+                    borderRadius: 12,
+                    padding: "16px 16px",
+                    cursor: "pointer",
+                    background: methodology === "ict" ? "#7C6AFF12" : "transparent",
+                    border: `1.5px solid ${methodology === "ict" ? "#7C6AFF" : "#1A1929"}`,
+                    transition: "all 0.2s",
+                    color: "#E2DDD6",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 9, background: methodology === "ict" ? "#7C6AFF22" : "#13121E", color: methodology === "ict" ? "#7C6AFF" : "#3D3B52", display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${methodology === "ict" ? "#7C6AFF44" : "#1F1E2A"}` }}><TargetIcon /></div>
+                    <span className="f-display" style={{ fontSize: "0.95rem", fontWeight: 600 }}>ICT</span>
+                  </div>
+                  <div className="f-sans" style={{ fontSize: "0.72rem", color: "#6A6480", lineHeight: 1.55 }}>Inner Circle Trader — liquidity pools, PD arrays, kill zones & OTE.</div>
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 20 }}>
+              <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                <ShieldIcon /> 3 · Risk Guard <span className="f-mono" style={{ color: "#22C55E", marginLeft: "auto", fontSize: "0.58rem" }}>Max 20%</span>
+              </div>
+
+              <div className="f-sans" style={{ fontSize: "0.72rem", color: "#3D3B52", marginBottom: 8 }}>ACCOUNT BALANCE (USD)</div>
+              <div style={{ position: "relative", marginBottom: 18 }}>
+                <span className="f-mono" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "#5A5470", fontSize: "0.85rem" }}>$</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(e.target.value)}
+                  className="f-mono"
+                  style={{ width: "100%", padding: "11px 14px 11px 30px", borderRadius: 10, border: "1px solid #1F1E2A", background: "#0A0A0F", color: "#E2DDD6", fontSize: "0.9rem", outline: "none", transition: "border-color 0.2s" }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#7C6AFF66")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "#1F1E2A")}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                <span className="f-sans" style={{ fontSize: "0.72rem", color: "#3D3B52" }}>RISK PER TRADE</span>
+                <span className="f-display" style={{ fontSize: "1.3rem", color: riskPercent > 20 ? "#FF5252" : "#7C6AFF", fontWeight: 600 }}>{effectiveRisk}%</span>
+              </div>
+              <input type="range" min="0.5" max="20" step="0.5" value={Math.min(20, riskPercent)} onChange={(e) => setRiskPercent(Number(e.target.value))} style={{ marginBottom: 6 }} />
+              <div className="f-mono" style={{ display: "flex", justifyContent: "space-between", fontSize: "0.55rem", color: "#3D3B52", marginBottom: 14 }}>
+                <span>0.5%</span>
+                <span style={{ color: "#22C55E" }}>2% safe zone</span>
+                <span style={{ color: "#FF5252" }}>20% hard cap</span>
+              </div>
+
+              <div style={{ borderRadius: 12, border: "1px solid #22C55E33", background: "#22C55E0D", padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <div className="f-sans" style={{ fontSize: "0.72rem", color: "#A09A92" }}>Worst case loss<br /><span className="f-mono" style={{ fontSize: "0.55rem", color: "#5A5470" }}>if stop loss is hit</span></div>
+                <div className="f-display" style={{ fontSize: "1.35rem", color: "#22C55E", fontWeight: 700 }}>${maxLoss.toLocaleString("en-US", { maximumFractionDigits: 2 })}</div>
+              </div>
+
+              {riskPercent > 20 && (
+                <div className="f-mono" style={{ marginTop: 10, padding: "9px 12px", borderRadius: 8, background: "#FF525212", border: "1px solid #FF525233", color: "#FF5252", fontSize: "0.62rem", display: "flex", alignItems: "center", gap: 7 }}>
+                  <LockIcon /> Capped at 20% — we will never risk more than a fifth of your account on one trade.
+                </div>
+              )}
+            </div>
+
+            <button className="btn-primary" style={{ width: "100%" }} disabled={!canAnalyze} onClick={analyze}>
+              {analyzing ? (
+                <>
+                  <span className="spin" style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} />
+                  Analyzing chart...
+                </>
+              ) : (
+                <>
+                  <ZapIcon /> Analyze Chart
+                </>
+              )}
+            </button>
+
+            {error && (
+              <div className="f-mono fade-up" style={{ padding: "12px 16px", borderRadius: 12, background: "#FF525212", border: "1px solid #FF525233", color: "#FF5252", fontSize: "0.7rem", lineHeight: 1.6 }}>
+                {error}
+              </div>
+            )}
           </div>
-        </header>
 
-        <main className="flex-1 p-4 md:p-6 overflow-y-auto scrollbar-thin">
-
-          {activePage === "signals" && (
-            <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-                <div className="stat-card"><div className="stat-label">Active Buy</div><div className="stat-value" style={{ color: "#22C55E" }}>{buyCount}</div></div>
-                <div className="stat-card"><div className="stat-label">Active Sell</div><div className="stat-value" style={{ color: "#FF5252" }}>{sellCount}</div></div>
-                <div className="stat-card"><div className="stat-label">Avg Trust</div><div className="stat-value" style={{ color: "#7C6AFF" }}>{avgTrust}%</div></div>
-                <div className="stat-card"><div className="stat-label">High Trust</div><div className="stat-value" style={{ color: "#22C55E" }}>{highTrust}</div></div>
-              </div>
-              {signals.length === 0 ? (
-                <div className="card p-16 text-center">
-                  <div className="pulse mx-auto mb-4" style={{ width: 24, height: 24, border: "2px solid #7C6AFF", borderRadius: "50%", borderTopColor: "transparent" }} />
-                  <div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.8rem", marginBottom: 6 }}>Scanning for sniper entries...</div>
-                  <div className="f-mono" style={{ color: "#2D2B3C", fontSize: "0.65rem" }}>Auto-scrapes every 2 minutes</div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {signals.map(sig => (
-                    <SignalCard key={sig._id} sig={sig} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {activePage === "setups" && (
-            <>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                <div className="stat-card"><div className="stat-label">Running</div><div className="stat-value" style={{ color: "#7C6AFF" }}>{runningCount}</div></div>
-                <div className="stat-card"><div className="stat-label">Won</div><div className="stat-value" style={{ color: "#22C55E" }}>{succeededCount}</div></div>
-                <div className="stat-card"><div className="stat-label">Lost</div><div className="stat-value" style={{ color: "#FF5252" }}>{failedCount}</div></div>
-              </div>
-              {runningSetups.length === 0 ? (
-                <div className="card p-16 text-center">
-                  <div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.82rem" }}>No running setups</div>
-                  <div className="f-mono" style={{ color: "#2D2B3C", fontSize: "0.65rem", marginTop: 4 }}>New setups appear here when signals are active</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {runningSetups.map(setup => (
-                    <SetupCard key={setup._id} setup={setup} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {activePage === "ended" && (
-            <>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                <div className="stat-card"><div className="stat-label">Total Ended</div><div className="stat-value" style={{ color: "#E2DDD6" }}>{endedSetups.length}</div></div>
-                <div className="stat-card"><div className="stat-label">Won</div><div className="stat-value" style={{ color: "#22C55E" }}>{succeededCount}</div></div>
-                <div className="stat-card"><div className="stat-label">Win Rate</div><div className="stat-value" style={{ color: "#7C6AFF" }}>{winRate}%</div></div>
-              </div>
-              {endedSetups.length === 0 ? (
-                <div className="card p-16 text-center">
-                  <div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.82rem" }}>No ended setups yet</div>
-                  <div className="f-mono" style={{ color: "#2D2B3C", fontSize: "0.65rem", marginTop: 4 }}>Completed trades will appear here</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {endedSetups.map(setup => (
-                    <SetupCard key={setup._id} setup={setup} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {activePage === "news" && (
-            <>
-              {newsLoading && news.length === 0 ? (
-                <div className="card p-16 text-center"><div className="pulse mx-auto mb-4" style={{ width: 24, height: 24, border: "2px solid #7C6AFF", borderRadius: "50%", borderTopColor: "transparent" }} /><div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.8rem", marginTop: 8 }}>Loading economic calendar...</div></div>
-              ) : news.length === 0 ? (
-                <div className="card p-16 text-center">
-                  <div className="pulse mx-auto mb-4" style={{ width: 24, height: 24, border: "2px solid #7C6AFF", borderRadius: "50%", borderTopColor: "transparent" }} />
-                  <div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.82rem", marginBottom: 4 }}>No events found</div>
-                  <div className="f-mono" style={{ color: "#2D2B3C", fontSize: "0.65rem" }}>Check back soon for new economic events</div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {news.map((n, i) => (
-                    <div key={n._id || i} className="news-card fade-in" data-impact={n.impact}>
-                      <div className="news-header">
-                        <div className="news-pair-section">
-                          <span className="news-pair">{n.pair}</span>
-                          <span className={`news-impact-badge impact-${n.impact}`}>{n.impact === "high" ? "HIGH" : n.impact === "medium" ? "MEDIUM" : "LOW"}</span>
-                          {n.direction === "BUY" && <span className="news-impact-badge impact-bullish"><ArrowUp /> Bullish Impact</span>}
-                          {n.direction === "SELL" && <span className="news-impact-badge impact-bearish"><ArrowDown /> Bearish Impact</span>}
-                          {n.direction === "WAIT" && <span className="news-impact-badge impact-neutral">No Clear Impact</span>}
-                        </div>
-                        <span className="news-time">{formatTime(n.timestamp)}</span>
-                      </div>
-
-                      <div className="news-impact-label">
-                        {n.direction === "BUY" && <span className="impact-text bullish">May push price higher — watch for BUY entries if news beats expectations</span>}
-                        {n.direction === "SELL" && <span className="impact-text bearish">May push price lower — watch for SELL entries if news misses expectations</span>}
-                        {n.direction === "WAIT" && <span className="impact-text neutral">Low impact — unlikely to move the market significantly, no actionable trade</span>}
-                      </div>
-
-                      {n.direction !== "WAIT" && n.entry > 0 && (
-                        <div className="news-setup-row">
-                          <div className="news-setup-item"><span>Entry</span><b>{n.entry}</b></div>
-                          <div className="news-setup-item"><span>SL</span><b style={{ color: "#FF5252" }}>{n.stopLoss}</b></div>
-                          <div className="news-setup-item"><span>TP</span><b style={{ color: "#22C55E" }}>{n.takeProfit}</b></div>
-                          <div className="news-setup-item"><span>R:R</span><b style={{ color: "#7C6AFF" }}>1:{n.riskReward}</b></div>
-                          <div className="news-setup-item"><span>Confidence</span><b style={{ color: n.confidence >= 70 ? "#22C55E" : "#FF9500" }}>{n.confidence}%</b></div>
-                        </div>
-                      )}
-
-                      <div className="news-reasoning">
-                        {n.reasoning}
-                      </div>
-
-                      <div className="news-footer">
-                        <span>Forex Factory Calendar</span>
-                      </div>
+          <div className="lg:col-span-3">
+            {!result && !analyzing && (
+              <div className="card" style={{ padding: "36px 28px", minHeight: 380, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <div style={{ width: 54, height: 54, borderRadius: 16, background: "#7C6AFF12", border: "1px solid #7C6AFF33", color: "#7C6AFF", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><ScanIcon /></div>
+                <h2 className="f-display" style={{ fontSize: "1.3rem", textAlign: "center", marginBottom: 8 }}>Ready when you are</h2>
+                <p className="f-sans" style={{ fontSize: "0.85rem", color: "#6A6480", textAlign: "center", lineHeight: 1.7, maxWidth: 420, margin: "0 auto 26px" }}>
+                  Your AI trade plan will appear here — entry, stop loss, take profit, key levels, and a position size that keeps your loss under the risk cap.
+                </p>
+                <div style={{ maxWidth: 380, margin: "0 auto", width: "100%" }}>
+                  {[
+                    { n: "1", t: "Upload your TradingView screenshot" },
+                    { n: "2", t: "Choose SMC or ICT methodology" },
+                    { n: "3", t: "Set your risk budget (max 20%)" },
+                    { n: "4", t: "Hit Analyze — levels in seconds" },
+                  ].map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0" }}>
+                      <div className="f-mono" style={{ width: 26, height: 26, borderRadius: 8, background: "#13121E", border: "1px solid #1F1E2A", color: "#7C6AFF", fontSize: "0.65rem", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{s.n}</div>
+                      <span className="f-sans" style={{ fontSize: "0.82rem", color: "#5A5470" }}>{s.t}</span>
                     </div>
                   ))}
                 </div>
-              )}
-            </>
-          )}
 
-          {activePage === "markets" && (
-            <>
-              <div className="flex flex-wrap gap-2 mb-5">
-                {MONITORED_PAIRS.map(pair => (
-                  <button key={pair} className="f-mono" style={{ fontSize: "0.72rem", fontWeight: 600, padding: "7px 14px", borderRadius: 6, border: `1px solid ${selectedMarket === pair ? "#7C6AFF55" : "#1A1929"}`, color: selectedMarket === pair ? "#7C6AFF" : "#5A5470", background: selectedMarket === pair ? "#7C6AFF12" : "transparent", cursor: "pointer", transition: "all 0.15s" }} onClick={() => setSelectedMarket(pair)}>{pair}</button>
-                ))}
-              </div>
-
-              <div className="card mb-6" style={{ height: 500, position: "relative", overflow: "hidden" }}>
-                <div id="tv-chart-container" style={{ height: "100%", width: "100%" }} />
-                {chartLoading && (
-                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#0A0A0F", zIndex: 10 }}>
-                    <div style={{ textAlign: "center" }}>
-                      <div className="pulse" style={{ width: 32, height: 32, border: "3px solid #7C6AFF", borderRadius: "50%", borderTopColor: "transparent", margin: "0 auto 10px" }} />
-                      <div className="f-mono" style={{ fontSize: "0.7rem", color: "#3D3B52" }}>Loading chart...</div>
+                {recent.length > 0 && (
+                  <div style={{ marginTop: 28, borderTop: "1px solid #13121C", paddingTop: 20 }}>
+                    <div className="f-mono" style={{ fontSize: "0.58rem", color: "#3D3B52", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Recent Analyses</div>
+                    <div className="space-y-2">
+                      {recent.map((r, i) => (
+                        <div key={i} className="fade-up" style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: "#0A0A0F", border: "1px solid #1A1929" }}>
+                          <span className="f-mono" style={{ fontSize: "0.7rem", fontWeight: 700, color: r.direction === "BUY" ? "#22C55E" : "#FF5252" }}>{r.direction}</span>
+                          <span className="f-mono" style={{ fontSize: "0.72rem", color: "#E2DDD6", fontWeight: 600 }}>{r.instrument}</span>
+                          <span className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", textTransform: "uppercase" }}>{r.methodology}</span>
+                          <span className="f-mono" style={{ marginLeft: "auto", fontSize: "0.6rem", color: "#3D3B52", display: "flex", alignItems: "center", gap: 4 }}><ClockIcon />{new Date(r.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
               </div>
+            )}
 
-              {analysisLoading ? (
-                <div className="card p-6 mb-6 text-center">
-                  <div className="pulse mx-auto mb-3" style={{ width: 24, height: 24, border: "2px solid #7C6AFF", borderRadius: "50%", borderTopColor: "transparent" }} />
-                  <div className="f-mono" style={{ color: "#3D3B52", fontSize: "0.78rem" }}>Analyzing {selectedMarket}...</div>
+            {analyzing && (
+              <div className="card" style={{ padding: 24, minHeight: 380 }}>
+                {imageDataUrl && (
+                  <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid #1A1929", marginBottom: 20 }}>
+                    <img src={imageDataUrl} alt="Chart being analyzed" style={{ width: "100%", display: "block", filter: "brightness(0.7)" }} />
+                    <div className="scan-line" />
+                    <div style={{ position: "absolute", top: 12, left: 12, background: "rgba(10,10,15,0.85)", border: "1px solid #7C6AFF44", borderRadius: 8, padding: "6px 12px" }}>
+                      <span className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.1em", textTransform: "uppercase" }}>AI Scanning — {methodology?.toUpperCase()}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {[
+                    "Reading chart structure & price axis",
+                    "Identifying order blocks & fair value gaps",
+                    "Locating liquidity pools & sweeps",
+                    "Mapping market structure (BOS / CHoCH)",
+                    "Placing sniper entry, stop loss & take profit",
+                    "Calculating position size for your risk guard",
+                  ].map((step, i) => (
+                    <div key={i} className="fade-up" style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 10, background: "#0A0A0F", border: "1px solid #1A1929" }}>
+                      <span className="pulse" style={{ width: 7, height: 7, borderRadius: "50%", background: i < 3 ? "#7C6AFF" : "#3D3B52", flexShrink: 0 }} />
+                      <span className="f-sans" style={{ fontSize: "0.8rem", color: i < 3 ? "#A09A92" : "#3D3B52" }}>{step}</span>
+                    </div>
+                  ))}
                 </div>
-              ) : marketAnalysis && (
-                <div className="fade-in">
-                  <div className="card p-5 mb-4">
-                    <div className="flex items-center gap-3 mb-4">
-                      <TargetIcon />
-                      <span className="f-sans" style={{ fontSize: "0.95rem", fontWeight: 600, color: "#E2DDD6" }}>Analysis — {selectedMarket}</span>
-                      <span className={`f-mono px-2.5 py-0.5 rounded text-xs font-semibold ${marketAnalysis.bias === "BULLISH" ? "dir-buy" : marketAnalysis.bias === "BEARISH" ? "dir-sell" : "badge-neutral"}`}>{marketAnalysis.bias}</span>
-                      {marketAnalysis.setup?.direction && (
-                        <span className={`f-mono px-2.5 py-0.5 rounded text-xs font-bold ${marketAnalysis.setup.direction === "BUY" ? "dir-buy" : "dir-sell"}`}>{marketAnalysis.setup.direction} 1:{marketAnalysis.setup.rr}</span>
-                      )}
-                    </div>
+              </div>
+            )}
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                      {marketAnalysis.keyLevels.map((lvl, i) => (
-                        <div key={i} className="card p-3" style={{ background: "#0A0A0F" }}>
-                          <div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{lvl.label}</div>
-                          <div className="f-mono" style={{ fontSize: "0.85rem", fontWeight: 600, color: lvl.type === "fvg" || lvl.type === "ob" ? "#A855F7" : lvl.type === "support" || lvl.type === "demand" ? "#22C55E" : lvl.type === "resistance" || lvl.type === "supply" ? "#FF5252" : "#E2DDD6" }}>{lvl.price}</div>
-                        </div>
-                      ))}
-                    </div>
+            {result && (
+              <div className="space-y-5 fade-up">
+                {result.demo && (
+                  <div className="f-mono" style={{ padding: "12px 16px", borderRadius: 12, background: "#FF950012", border: "1px solid #FF950033", color: "#FF9500", fontSize: "0.68rem", lineHeight: 1.6, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}><ShieldIcon /></span>
+                    <span><b>DEMO ANALYSIS</b> — the live AI service was unreachable, so this is a sample plan. Re-run to get a real analysis of your chart.</span>
+                  </div>
+                )}
 
-                    {marketAnalysis.setup && (
-                      <div className="card p-4 mb-4" style={{ background: "#0A0A0F", borderLeft: `3px solid ${marketAnalysis.setup.direction === "BUY" ? "#22C55E" : "#FF5252"}` }}>
-                        <div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Suggested Setup</div>
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                          <div><div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 2 }}>Entry</div><div className="f-mono" style={{ fontSize: "0.9rem", color: "#E2DDD6", fontWeight: 600 }}>{marketAnalysis.setup.entry}</div></div>
-                          <div><div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 2 }}>Stop Loss</div><div className="f-mono" style={{ fontSize: "0.9rem", color: "#FF5252", fontWeight: 600 }}>{marketAnalysis.setup.sl}</div></div>
-                          <div><div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 2 }}>Take Profit</div><div className="f-mono" style={{ fontSize: "0.9rem", color: "#22C55E", fontWeight: 600 }}>{marketAnalysis.setup.tp}</div></div>
-                          <div><div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 2 }}>R:R</div><div className="f-mono" style={{ fontSize: "0.9rem", color: "#7C6AFF", fontWeight: 600 }}>1:{marketAnalysis.setup.rr}</div></div>
-                          <div><div className="f-mono" style={{ fontSize: "0.5rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 2 }}>Direction</div><div className={`f-mono px-2 py-0.5 rounded text-xs font-bold ${marketAnalysis.setup.direction === "BUY" ? "dir-buy" : "dir-sell"}`} style={{ display: "inline-block", marginTop: 4 }}>{marketAnalysis.setup.direction}</div></div>
-                        </div>
+                {result.riskCapApplied && (
+                  <div className="f-mono" style={{ padding: "12px 16px", borderRadius: 12, background: "#FF525212", border: "1px solid #FF525233", color: "#FF5252", fontSize: "0.68rem", lineHeight: 1.6, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span style={{ flexShrink: 0, marginTop: 1 }}><LockIcon /></span>
+                    <span><b>RISK CAPPED</b> — you requested more than 20% risk. We clamped it to 20% so a single trade can never wipe out more than a fifth of your account.</span>
+                  </div>
+                )}
+
+                <div className="card" style={{ padding: "22px 24px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                    <div style={{ width: 56, height: 56, borderRadius: 16, background: buy ? "#22C55E12" : "#FF525212", border: `1px solid ${buy ? "#22C55E44" : "#FF525244"}`, color: buy ? "#22C55E" : "#FF5252", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {buy ? <ArrowUp /> : <ArrowDown />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span className="f-display" style={{ fontSize: "1.4rem", fontWeight: 700, color: buy ? "#22C55E" : "#FF5252" }}>{result.direction}</span>
+                        <span className="f-mono" style={{ fontSize: "1rem", fontWeight: 600, color: "#E2DDD6" }}>{result.instrument}</span>
+                        <span className="nav-pill" style={{ color: "#7C6AFF", background: "#7C6AFF12", border: "1px solid #7C6AFF33" }}>{result.timeframe}</span>
+                        <span className="nav-pill" style={{ color: "#A855F7", background: "#A855F712", border: "1px solid #A855F733", textTransform: "uppercase" }}>{result.methodology}</span>
                       </div>
-                    )}
+                      <div className="f-mono" style={{ fontSize: "0.62rem", color: "#3D3B52", marginTop: 6 }}>SNIPER SETUP · AI {result.demo ? "DEMO" : "ANALYSIS"}</div>
+                    </div>
+                    <ConfidenceRing value={result.confidence} />
+                  </div>
 
-                    <div className="p-3 rounded-lg" style={{ background: "#0A0A0F", borderLeft: "2px solid #7C6AFF33" }}>
-                      <p className="f-mono" style={{ fontSize: "0.68rem", color: "#6A6480", lineHeight: 1.6 }}>{marketAnalysis.reasoning}</p>
+                  {result.summary && (
+                    <p className="f-sans" style={{ fontSize: "0.82rem", color: "#6A6480", lineHeight: 1.7, marginTop: 18, borderTop: "1px solid #13121C", paddingTop: 16 }}>{result.summary}</p>
+                  )}
+                </div>
+
+                {imageDataUrl && (
+                  <div className="card" style={{ overflow: "hidden", padding: 0 }}>
+                    <img src={imageDataUrl} alt="Analyzed chart" style={{ width: "100%", display: "block" }} />
+                    <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderTop: "1px solid #1A1929", background: "#0A0A0F" }}>
+                      <span className="nav-pill" style={{ color: buy ? "#22C55E" : "#FF5252", background: buy ? "#22C55E10" : "#FF525210", border: `1px solid ${buy ? "#22C55E33" : "#FF525233"}` }}>{result.direction}</span>
+                      <span className="f-mono" style={{ fontSize: "0.62rem", color: "#3D3B52" }}>{result.instrument} · {result.timeframe} · {imageName}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="card" style={{ padding: 22 }}>
+                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 16 }}>Trade Plan</div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div style={{ borderRadius: 12, border: "1px solid #1A1929", background: "#0A0A0F", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Sniper Entry</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: "#E2DDD6", fontWeight: 600 }}>{fmt(result.sniperEntry, result.instrument)}</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#7C6AFF", marginTop: 4 }}>precise limit</div>
+                    </div>
+                    <div style={{ borderRadius: 12, border: "1px solid #1A1929", background: "#0A0A0F", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Entry</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: "#E2DDD6", fontWeight: 600 }}>{fmt(result.entry, result.instrument)}</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", marginTop: 4 }}>activation</div>
+                    </div>
+                    <div style={{ borderRadius: 12, border: "1px solid #FF525233", background: "#FF52520A", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#FF5252", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Stop Loss</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: "#FF5252", fontWeight: 600 }}>{fmt(result.stopLoss, result.instrument)}</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#FF525288", marginTop: 4 }}>risk {riskDistance.toFixed(dec)}</div>
+                    </div>
+                    <div style={{ borderRadius: 12, border: "1px solid #22C55E33", background: "#22C55E0A", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#22C55E", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Take Profit</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: "#22C55E", fontWeight: 600 }}>{fmt(result.takeProfit, result.instrument)}</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#22C55E88", marginTop: 4 }}>reward {rewardDistance.toFixed(dec)}</div>
+                    </div>
+                    <div style={{ borderRadius: 12, border: "1px solid #7C6AFF33", background: "#7C6AFF0A", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#7C6AFF", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Risk : Reward</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: "#7C6AFF", fontWeight: 600 }}>1 : {result.riskReward}</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", marginTop: 4 }}>for every 1 at risk</div>
+                    </div>
+                    <div style={{ borderRadius: 12, border: "1px solid #FF950033", background: "#FF95000A", padding: "14px 16px" }}>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#FF9500", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Confidence</div>
+                      <div className="f-display" style={{ fontSize: "1.15rem", color: confidenceColor, fontWeight: 600 }}>{result.confidence}%</div>
+                      <div className="f-mono" style={{ fontSize: "0.55rem", color: "#3D3B52", marginTop: 4 }}>{result.confidence >= 75 ? "sniper quality" : result.confidence >= 55 ? "decent — be careful" : "weak — consider waiting"}</div>
                     </div>
                   </div>
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(() => {
-                  const pairSignals = signals.filter(s => s.pair === selectedMarket);
-                  return (
-                    <>
-                      <div className="card p-5">
-                        <div className="f-sans" style={{ fontSize: "0.9rem", fontWeight: 600, color: "#E2DDD6", marginBottom: 12 }}>{selectedMarket} — Active Signals</div>
-                        {pairSignals.length === 0 ? (
-                          <div className="f-mono" style={{ fontSize: "0.72rem", color: "#3D3B52" }}>No active signals</div>
-                        ) : (
-                          <div className="space-y-2">
-                            {pairSignals.slice(0, 5).map(s => (
-                              <div key={s._id} className="flex items-center justify-between py-2" style={{ borderBottom: "1px solid #1A1929" }}>
-                                <span className={`signal-direction ${s.direction === "BUY" ? "dir-buy" : "dir-sell"}`} style={{ fontSize: "0.65rem", padding: "2px 8px" }}>{s.direction}</span>
-                                <span className="f-mono" style={{ fontSize: "0.68rem", color: "#E2DDD6" }}>{s.entry}</span>
-                                <span className="f-mono" style={{ fontSize: "0.62rem", color: "#FF5252" }}>SL: {s.stopLoss}</span>
-                                <span className="f-mono" style={{ fontSize: "0.62rem", color: "#22C55E" }}>TP: {s.takeProfit}</span>
-                              </div>
-                            ))}
+                {result.positionSize && (
+                  <div className="card" style={{ padding: 22, borderColor: result.positionSize.supported ? "#22C55E33" : "#FF950033" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 11, background: "#22C55E12", border: "1px solid #22C55E44", color: "#22C55E", display: "flex", alignItems: "center", justifyContent: "center" }}><ShieldIcon /></div>
+                      <div style={{ flex: 1 }}>
+                        <div className="f-sans" style={{ fontSize: "0.92rem", fontWeight: 600, color: "#E2DDD6" }}>Risk Guard — you can't lose more than {result.positionSize.riskPercent}%</div>
+                        <div className="f-mono" style={{ fontSize: "0.58rem", color: "#3D3B52", marginTop: 3 }}>POSITION SIZE CALCULATED FROM YOUR RISK BUDGET</div>
+                      </div>
+                      {result.positionSize.supported && (
+                        <span className="nav-pill" style={{ color: "#22C55E", background: "#22C55E10", border: "1px solid #22C55E33" }}>
+                          <LockIcon /> Protected
+                        </span>
+                      )}
+                    </div>
+
+                    {result.positionSize.supported ? (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ marginBottom: 16 }}>
+                          <div style={{ borderRadius: 12, border: "1px solid #1A1929", background: "#0A0A0F", padding: "12px 14px" }}>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 4 }}>Account</div>
+                            <div className="f-mono" style={{ fontSize: "0.95rem", color: "#E2DDD6", fontWeight: 600 }}>${balance.toLocaleString("en-US")}</div>
                           </div>
-                        )}
+                          <div style={{ borderRadius: 12, border: "1px solid #1A1929", background: "#0A0A0F", padding: "12px 14px" }}>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 4 }}>Risk Budget</div>
+                            <div className="f-mono" style={{ fontSize: "0.95rem", color: "#7C6AFF", fontWeight: 600 }}>${result.positionSize.riskAmount.toLocaleString("en-US", { maximumFractionDigits: 2 })}</div>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#3D3B52" }}>{result.positionSize.riskPercent}% of account</div>
+                          </div>
+                          <div style={{ borderRadius: 12, border: "1px solid #22C55E44", background: "#22C55E0D", padding: "12px 14px" }}>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#22C55E", textTransform: "uppercase", marginBottom: 4 }}>Position Size</div>
+                            <div className="f-mono" style={{ fontSize: "1.15rem", color: "#22C55E", fontWeight: 700 }}>{result.positionSize.lots.toFixed(2)} lots</div>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#22C55E88" }}>stop distance {result.positionSize.pipLabel}</div>
+                          </div>
+                          <div style={{ borderRadius: 12, border: "1px solid #1A1929", background: "#0A0A0F", padding: "12px 14px" }}>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#3D3B52", textTransform: "uppercase", marginBottom: 4 }}>Worst Case Loss</div>
+                            <div className="f-mono" style={{ fontSize: "0.95rem", color: result.positionSize.actualPercent <= 20 ? "#22C55E" : "#FF5252", fontWeight: 600 }}>${result.positionSize.actualLoss.toLocaleString("en-US", { maximumFractionDigits: 2 })}</div>
+                            <div className="f-mono" style={{ fontSize: "0.52rem", color: "#3D3B52" }}>{result.positionSize.actualPercent.toFixed(2)}% of account</div>
+                          </div>
+                        </div>
+                        <div className="f-mono" style={{ fontSize: "0.62rem", color: "#5A5470", lineHeight: 1.7 }}>
+                          {result.positionSize.note} <span style={{ color: "#22C55E" }}>This size is capped so a stop-loss hit costs at most {result.positionSize.riskPercent}% of your account.</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="f-mono" style={{ fontSize: "0.68rem", color: "#FF9500", lineHeight: 1.7, padding: "12px 14px", borderRadius: 10, background: "#FF95000D", border: "1px solid #FF950033" }}>
+                        Position sizing isn't auto-available for <b>{result.positionSize.instrument}</b>. Manual rule: the most you risk on this trade is ${result.positionSize.riskAmount.toLocaleString("en-US", { maximumFractionDigits: 2 })} ({result.positionSize.riskPercent}% of your account) — size your contract so a stop-loss hit never exceeds that.
                       </div>
-                      <div className="card p-5">
-                        <div className="f-sans" style={{ fontSize: "0.9rem", fontWeight: 600, color: "#E2DDD6", marginBottom: 12 }}>Consensus</div>
-                        {(() => {
-                          const buys = pairSignals.filter(s => s.direction === "BUY");
-                          const sells = pairSignals.filter(s => s.direction === "SELL");
-                          if (pairSignals.length === 0) return <div className="f-mono" style={{ fontSize: "0.72rem", color: "#3D3B52" }}>No data yet</div>;
-                          return (
-                            <div className="space-y-3">
-                              {buys.length > 0 && (
-                                <div className="p-3 rounded" style={{ background: "#22C55E0D", border: "1px solid #22C55E22" }}>
-                                  <div className="f-mono" style={{ fontSize: "0.5rem", color: "#22C55E", textTransform: "uppercase", marginBottom: 3 }}>Buy Interest</div>
-                                  <div className="f-mono" style={{ fontSize: "0.9rem", color: "#22C55E", fontWeight: 700 }}>{buys.length} signal{buys.length > 1 ? "s" : ""}</div>
-                                </div>
-                              )}
-                              {sells.length > 0 && (
-                                <div className="p-3 rounded" style={{ background: "#FF52520D", border: "1px solid #FF525222" }}>
-                                  <div className="f-mono" style={{ fontSize: "0.5rem", color: "#FF5252", textTransform: "uppercase", marginBottom: 3 }}>Sell Interest</div>
-                                  <div className="f-mono" style={{ fontSize: "0.9rem", color: "#FF5252", fontWeight: 700 }}>{sells.length} signal{sells.length > 1 ? "s" : ""}</div>
-                                </div>
-                              )}
-                              <div className="p-3 rounded" style={{ background: "#7C6AFF0D", border: "1px solid #7C6AFF22" }}>
-                                <div className="f-mono" style={{ fontSize: "0.5rem", color: "#7C6AFF", textTransform: "uppercase", marginBottom: 3 }}>Bias</div>
-                                <div className="f-mono" style={{ fontSize: "0.85rem", color: "#E2DDD6", fontWeight: 600 }}>
-                                  {buys.length > sells.length ? "Bullish" : buys.length < sells.length ? "Bearish" : "Neutral"}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </>
-                  );
-                })()}
+                    )}
+                  </div>
+                )}
+
+                {result.keyLevels.length > 0 && (
+                  <div className="card" style={{ padding: 22 }}>
+                    <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 14 }}>Key Levels Identified</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {result.keyLevels.map((lvl, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 13px", borderRadius: 9, background: "#0A0A0F", border: "1px solid #1A1929" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: LEVEL_COLORS[lvl.type] || "#E2DDD6", flexShrink: 0 }} />
+                          <span className="f-mono" style={{ fontSize: "0.62rem", color: "#5A5470" }}>{lvl.label}:</span>
+                          <span className="f-mono" style={{ fontSize: "0.68rem", color: "#E2DDD6", fontWeight: 600 }}>{lvl.price}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="card" style={{ padding: 22 }}>
+                  <div className="f-mono" style={{ fontSize: "0.6rem", color: "#7C6AFF", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 14 }}>The Setup, Step by Step</div>
+                  {result.reasoning.map((step, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, padding: "9px 0", alignItems: "flex-start" }}>
+                      <div className="f-mono" style={{ width: 24, height: 24, borderRadius: 8, background: "#13121E", border: "1px solid #1F1E2A", color: "#7C6AFF", fontSize: "0.6rem", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
+                      <p className="f-sans" style={{ fontSize: "0.8rem", color: "#A09A92", lineHeight: 1.65 }}>{step}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {result.invalidation && (
+                  <div style={{ padding: "14px 18px", borderRadius: 12, background: "#FF52520D", border: "1px solid #FF525233", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <span style={{ color: "#FF5252", flexShrink: 0, marginTop: 1 }}><CloseIcon /></span>
+                    <div>
+                      <div className="f-mono" style={{ fontSize: "0.58rem", color: "#FF5252", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Invalidation</div>
+                      <p className="f-sans" style={{ fontSize: "0.8rem", color: "#A09A92", lineHeight: 1.6 }}>{result.invalidation}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button className="btn-primary" onClick={reset} style={{ flex: 1, minWidth: 200 }}>
+                    <RefreshIcon /> Analyze Another Chart
+                  </button>
+                </div>
               </div>
-            </>
-          )}
-        </main>
-      </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <footer style={{ borderTop: "1px solid #13121C", padding: "26px 24px", position: "relative", zIndex: 1 }}>
+        <div style={{ maxWidth: 1240, margin: "0 auto" }}>
+          <p className="f-mono" style={{ fontSize: "0.62rem", color: "#2D2B3C", lineHeight: 1.7, maxWidth: 900 }}>
+            Risk Warning: Trading forex and CFDs carries a high level of risk. The AI analysis and position sizing are educational tools, not financial advice. Levels are read from your screenshot and may be approximate — always confirm with live prices before entering. The 20% cap is a hard limit on position sizing, not a guarantee against larger losses from slippage, gaps, or human error. Never trade money you cannot afford to lose.
+          </p>
+          <div className="f-mono" style={{ fontSize: "0.62rem", color: "#1F1E2A", marginTop: 14 }}>© 2026 HTRADES · Sniper Entry AI</div>
+        </div>
+      </footer>
     </div>
   );
 }
