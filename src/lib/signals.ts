@@ -1,6 +1,5 @@
 import clientPromise from "./db";
 import type { Signal } from "./types";
-import { ObjectId } from "mongodb";
 
 export async function saveSignals(signals: Omit<Signal, "status" | "updatedAt" | "outcome" | "resultPips">[]): Promise<number> {
   if (signals.length === 0) return 0;
@@ -94,6 +93,7 @@ export async function updateSignalStatus(signalId: string, status: Signal["statu
   const collection = db.collection<Signal>("signals");
 
   await collection.updateOne(
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     { _id: new (require("mongodb").ObjectId)(signalId) },
     { $set: { status, outcome, resultPips, updatedAt: new Date() } }
   );

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import AuthButton from "@/components/AuthButton";
 
 type Methodology = "smc" | "ict";
@@ -285,10 +286,10 @@ export default function Dashboard() {
 
       <header className="f-sans sticky top-0 z-40" style={{ background: "rgba(10,10,15,0.9)", backdropFilter: "blur(14px)", borderBottom: "1px solid #13121C" }}>
         <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 24px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-          <a href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
             <div style={{ width: 30, height: 30, borderRadius: 9, background: "#7C6AFF", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: "0.95rem" }}>H</div>
             <span style={{ fontSize: "1.15rem", fontWeight: 700, color: "#E2DDD6", letterSpacing: "-0.01em" }}>HT<span style={{ color: "#7C6AFF" }}>RADES</span></span>
-          </a>
+          </Link>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span className="nav-pill" style={{ color: "#22C55E", background: "#22C55E10", border: "1px solid #22C55E22" }}>
               <span className="pulse" style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E", display: "inline-block" }} />
@@ -629,7 +630,7 @@ export default function Dashboard() {
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
                       <div style={{ width: 36, height: 36, borderRadius: 11, background: "#22C55E12", border: "1px solid #22C55E44", color: "#22C55E", display: "flex", alignItems: "center", justifyContent: "center" }}><ShieldIcon /></div>
                       <div style={{ flex: 1 }}>
-                        <div className="f-sans" style={{ fontSize: "0.92rem", fontWeight: 600, color: "#E2DDD6" }}>Risk Guard — you can't lose more than {result.positionSize.riskPercent}%</div>
+                        <div className="f-sans" style={{ fontSize: "0.92rem", fontWeight: 600, color: "#E2DDD6" }}>Risk Guard — you can&apos;t lose more than {result.positionSize.riskPercent}%</div>
                         <div className="f-mono" style={{ fontSize: "0.58rem", color: "#3D3B52", marginTop: 3 }}>POSITION SIZE CALCULATED FROM YOUR RISK BUDGET</div>
                       </div>
                       {result.positionSize.supported && (
@@ -668,7 +669,7 @@ export default function Dashboard() {
                       </>
                     ) : (
                       <div className="f-mono" style={{ fontSize: "0.68rem", color: "#FF9500", lineHeight: 1.7, padding: "12px 14px", borderRadius: 10, background: "#FF95000D", border: "1px solid #FF950033" }}>
-                        Position sizing isn't auto-available for <b>{result.positionSize.instrument}</b>. Manual rule: the most you risk on this trade is ${result.positionSize.riskAmount.toLocaleString("en-US", { maximumFractionDigits: 2 })} ({result.positionSize.riskPercent}% of your account) — size your contract so a stop-loss hit never exceeds that.
+                        Position sizing isn&apos;t auto-available for <b>{result.positionSize.instrument}</b>. Manual rule: the most you risk on this trade is ${result.positionSize.riskAmount.toLocaleString("en-US", { maximumFractionDigits: 2 })} ({result.positionSize.riskPercent}% of your account) — size your contract so a stop-loss hit never exceeds that.
                       </div>
                     )}
                   </div>
